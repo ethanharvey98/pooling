@@ -35,6 +35,8 @@ class ClfPool(torch.nn.Module):
             self.pool = layers.SelfAttentionPooling(in_features=self.out_features)
         elif self.pooling == "normal":
             self.pool = layers.NormalPooling(in_features=self.out_features)
+        elif self.pooling == "smmil":
+            self.pool = layers.SmMILPooling(in_features=self.out_features)
         else:
             raise NotImplementedError(f"The specified pooling operation \"{self.pooling}\" is not implemented.")
 
@@ -85,9 +87,11 @@ class PoolClf(torch.nn.Module):
         elif self.pooling == "transformer":
             self.num_heads = num_heads
             self.pool = layers.TransformerBasedPooling(in_features=self.hidden_dim, num_heads=self.num_heads)
+        elif self.pooling == "smmil":
+            self.pool = layers.SmMILPooling(in_features=self.hidden_dim)
         else:
             raise NotImplementedError(f"The specified pooling operation \"{self.pooling}\" is not implemented.")
-            
+
         self.clf = torch.nn.Linear(in_features=self.hidden_dim, out_features=self.out_features, bias=True)
 
 

@@ -204,5 +204,135 @@ class TransformerBasedPooling(torch.nn.Module):
         attn_weights = torch.cat([attn_weights_i[0,1:] for attn_weights_i in attn_weights])
         # Get class token
         x = torch.stack([x_i[0,:] for x_i in torch.split(x, lengths)])
-        
+
         return x, attn_weights
+
+
+class ApproxSm(torch.nn.Module):
+    def __init__(self, alpha=0.5, num_steps=10, learnable_alpha=True):
+        super().__init__()
+        self.num_steps = int(num_steps)
+        self.learnable_alpha = bool(learnable_alpha)
+        if self.learnable_alpha:
+            self.raw_alpha = torch.nn.Parameter(torch.log(torch.tensor(alpha / (1 - alpha), dtype=torch.float32)))
+        else:
+            self.register_buffer("raw_alpha", torch.log(torch.tensor(alpha / (1 - alpha), dtype=torch.float32)))
+
+    def _alpha(self):
+        return torch.sigmoid(self.raw_alpha)
+
+    def forward(self, f: torch.Tensor, neighbors: int = 1, self_loop: bool = False) -> torch.Tensor:
+        alpha = self._alpha()
+        S = f.size(0)
+        if S <= 1 or neighbors <= 0:
+            return f.clone()
+        squeeze = f.dim() == 1
+        if squeeze:
+            f = f.unsqueeze(1)
+        g = f.clone()
+        for _ in range(self.num_steps):
+            Ag = self._neighbor_average(g, neighbors, self_loop)
+            g = (1.0 - alpha) * f + alpha * Ag
+        return g.squeeze(1) if squeeze else g
+
+    def _neighbor_average(self, g: torch.Tensor, radius: int, self_loop: bool) -> torch.Tensor:
+        S, d = g.shape
+        agg = torch.zeros_like(g)
+        deg = torch.zeros((S, 1), device=g.device, dtype=g.dtype)
+        if self_loop:
+            agg += g
+            deg += 1.0
+        for k in range(1, radius + 1):
+            agg[k:] += g[:-k]
+            deg[k:] += 1.0
+            agg[:-k] += g[k:]
+            deg[:-k] += 1.0
+        return agg / deg.clamp_min(1e-12)
+
+
+def _build_chain_A(length: int, radius: int = 1, self_loop: bool = False, *, device=None, dtype=None):
+    A = torch.zeros((length, length), device=device, dtype=dtype)
+    if self_loop:
+        A.fill_diagonal_(1.0)
+    if length >= 2:
+        for k in range(1, radius + 1):
+            A[k:, :-k] += torch.eye(length - k, device=device, dtype=dtype)
+            A[:-k, k:] += torch.eye(length - k, device=device, dtype=dtype)
+    rowsum = A.sum(dim=1, keepdim=True).clamp_min(1e-12)
+    A = A / rowsum
+    return A
+
+
+class ExactSm(torch.nn.Module):
+    def __init__(self, alpha=0.5):
+        super().__init__()
+        if alpha == 'trainable':
+            self._raw = torch.nn.Parameter(torch.log(torch.tensor(alpha / (1 - alpha), dtype=torch.float32)))
+            self.register_buffer('_alpha_fixed', None)
+        else:
+            a = float(alpha)
+            if not (0.0 <= a < 1.0):
+                raise ValueError("alpha must be in [0,1).")
+            self._raw = None
+            self.register_buffer('_alpha_fixed', torch.tensor(a))
+
+    def _alpha(self):
+        return torch.sigmoid(self._raw) if self._raw is not None else self._alpha_fixed
+
+    def forward(self, f: torch.Tensor, neighbors: int = 1, self_loop: bool = False) -> torch.Tensor:
+        a = self._alpha()
+        S = f.size(0)
+        if S <= 1:
+            return f.clone()
+        squeeze = False
+        if f.dim() == 1:
+            f2 = f.unsqueeze(1)
+            squeeze = True
+        else:
+            f2 = f
+        A = _build_chain_A(S, radius=neighbors, self_loop=self_loop, device=f.device, dtype=f.dtype)
+        M = torch.eye(S, device=f.device, dtype=f.dtype) - a * A
+        rhs = (1.0 - a) * f2
+        g2 = torch.linalg.solve(M, rhs)
+        return g2.squeeze(1) if squeeze else g2
+
+
+class SmMILPooling(torch.nn.Module):
+    def __init__(self, in_features, temp=1.0, sm_alpha=0.5, sm_steps=10, sm_where='early'):
+        super().__init__()
+        self.in_features = in_features
+        self.temp = temp
+        self.sm_alpha = sm_alpha
+        self.sm_steps = sm_steps
+        self.sm_where = sm_where
+        fc1 = torch.nn.Linear(in_features=in_features, out_features=128)
+        fc2 = torch.nn.Linear(in_features=128, out_features=1)
+        if sm_where == 'early':
+            fc1 = torch.nn.utils.parametrizations.spectral_norm(fc1)
+            fc2 = torch.nn.utils.parametrizations.spectral_norm(fc2)
+        self.mlp = torch.nn.Sequential(fc1, torch.nn.Tanh(), fc2)
+        self.sm_layer_approx = ApproxSm(alpha=self.sm_alpha, num_steps=self.sm_steps, learnable_alpha=True)
+
+    def forward(self, x, lengths, neighbors=1):
+        if self.sm_where == 'early':
+            x_smoothed = torch.cat([
+                self.sm_layer_approx(x_i, neighbors=neighbors, self_loop=False)
+                for x_i in torch.split(x, lengths)
+            ])
+            attn_logits = self.mlp(x_smoothed)
+        else:
+            attn_logits = self.mlp(x)
+            attn_logits = torch.cat([
+                self.sm_layer_approx(logits_i, neighbors=neighbors, self_loop=False)
+                for logits_i in torch.split(attn_logits, lengths)
+            ])
+        attn_weights = torch.cat([
+            torch.nn.functional.softmax(logits_i / self.temp, dim=0)
+            for logits_i in torch.split(attn_logits, lengths)
+        ])
+        attn_weighted_x = attn_weights * x
+        context_vectors = torch.cat([
+            torch.sum(attn_weighted_x_i, dim=0, keepdim=True)
+            for attn_weighted_x_i in torch.split(attn_weighted_x, lengths)
+        ])
+        return context_vectors, attn_weights
