@@ -8,7 +8,7 @@ import losses
 import models
 import utils
 
-# python ../src/oasis-3.py --alpha=0.0 --batch_size=64 --criterion='ERM' --dataset_dir='/cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_CT/ViT_B_16/seed=1001' --embedding_level --epochs=1000 --experiments_dir='/cluster/tufts/hugheslab/eharve06/pooling/experiments/test' --lr=0.01 --model_name='test' --pooling='smAP' --save --seed=1001 --weight_decay=0.0
+# python ../src/oasis-3.py --alpha=0.0 --batch_size=64 --criterion='ERM' --dataset_dir='/cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_CT/ViT_B_16/seed=1001' --embedding_level --epochs=1000 --experiments_dir='/cluster/tufts/hugheslab/eharve06/pooling/experiments/test' --lr=0.01 --model_name='test' --pooling='SmAP' --save --seed=1001 --weight_decay=0.0
 if __name__=='__main__':
     parser = argparse.ArgumentParser(description='oasis-3.py')
     parser.add_argument('--alpha', default=0.0, help='TODO (default: 0.0)', type=float)

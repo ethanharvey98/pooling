@@ -9,15 +9,15 @@ class ClfPool(torch.nn.Module):
                             
         self.clf = torch.nn.Linear(in_features=in_features, out_features=out_features, bias=True)
                                     
-        assert pooling in ['Max', 'Mean', 'ABMIL', 'smAP']
+        assert pooling in ['Max', 'Mean', 'ABMIL', 'SmAP']
         if pooling == 'Max':
             self.pool = layers.Max()
         elif pooling == 'Mean':
             self.pool = layers.Mean()
         elif pooling == 'ABMIL':
             self.pool = layers.ABMIL(in_features=out_features)
-        elif pooling == 'smAP':
-            self.pool = layers.smAP(in_features=out_features)
+        elif pooling == 'SmAP':
+            self.pool = layers.SmAP(in_features=out_features)
 
     def forward(self, x, lengths):
         out = self.clf(x)                                
@@ -28,7 +28,7 @@ class PoolClf(torch.nn.Module):
     def __init__(self, in_features, out_features, pooling='Max', num_heads=8):
         super().__init__()
                                                         
-        assert pooling in ['Max', 'Mean', 'ABMIL', 'TransMIL', 'smAP']
+        assert pooling in ['Max', 'Mean', 'ABMIL', 'TransMIL', 'SmAP']
         if pooling == 'Max':
             self.pool = layers.Max()
         elif pooling == 'Mean':
@@ -37,8 +37,8 @@ class PoolClf(torch.nn.Module):
             self.pool = layers.ABMIL(in_features=in_features)
         elif pooling == 'TransMIL':
             self.pool = layers.TransMIL(in_features=in_features, num_heads=num_heads)
-        elif pooling == 'smAP':
-            self.pool = layers.smAP(in_features=in_features)
+        elif pooling == 'SmAP':
+            self.pool = layers.SmAP(in_features=in_features)
             
         self.clf = torch.nn.Linear(in_features=in_features, out_features=out_features, bias=True)
 
