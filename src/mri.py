@@ -6,6 +6,7 @@ import pandas as pd
 # Neuroimaging package(s)
 os.environ["ITK_GLOBAL_DEFAULT_NUMBER_OF_THREADS"] = "1"
 os.environ["ANTS_RANDOM_SEED"] = "42"
+import pydicom
 import ants
 from nilearn.image import resample_to_img
 # PyTorch
@@ -60,6 +61,24 @@ def get_ref_crop():
         with open("./ref_cropped_template.nii.gz", "wb") as file:
             file.write(response.content)
     return os.path.abspath("./ref_cropped_template.nii.gz")
+
+def group_dicom_files_in_dir(directory):
+
+    columns = ['Filename', 'SeriesNumber', 'SeriesDescription', 'InstanceNumber']
+    dtypes = {'Filename': 'string', 'SeriesNumber': 'int', 'SeriesDescription': 'string', 'InstanceNumber': 'int'}
+    folder_df = pd.DataFrame(columns=columns).astype(dtypes)
+
+    for filename in os.listdir(directory):
+        ds = pydicom.dcmread(f'{directory}/{filename}')
+        folder_df.loc[len(folder_df)] = [filename, ds.SeriesNumber, ds.SeriesDescription, ds.InstanceNumber]
+    
+    folder_df = folder_df.sort_values(by=['SeriesNumber', 'InstanceNumber'])
+    groupby_columns = ['SeriesNumber', 'SeriesDescription']
+    groupby_dict = {'Filename': list, 'InstanceNumber': list}
+    grouped_df = folder_df.groupby(groupby_columns).agg(groupby_dict).reset_index()
+    grouped_df = grouped_df.rename(columns={'Filename': 'Filenames'})
+        
+    return grouped_df
 
 def label_oasis3(directory, scan_types, condition):
     

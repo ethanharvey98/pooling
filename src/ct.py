@@ -23,9 +23,8 @@ def label_oasis3(directory):
     merged_df["diff"] = merged_df['scan_day'] - merged_df['diagnosis_day']
     merged_df["abs_diff"] = abs(merged_df["scan_day"] - merged_df["diagnosis_day"])
     # Diagnosis date must be between 80 days before or 360 days after scan date.
-    merged_df = merged_df[(merged_df["diff"]<=80)&(merged_df['diff']>=-365)]
+    merged_df = merged_df[(merged_df["diff"]<=80)&(merged_df['diff']>=-360)]
     merged_df = merged_df.loc[merged_df.groupby(["XNAT_CTSESSIONDATA ID"])["abs_diff"].idxmin()]
-    
     merged_df["Alzheimer\'s"] = merged_df["cdr"].apply(lambda item: 0 if item == 0.0 else 1)
     merged_df["paths"] = merged_df["XNAT_CTSESSIONDATA ID"].apply(lambda item: [get_latest_scan(f"{directory}/{item}")])
     
