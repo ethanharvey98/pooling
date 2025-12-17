@@ -36,10 +36,19 @@ def find_best_for_seed(folder_path, seed):
             if 'val_auroc' not in df.columns or 'test_auroc' not in df.columns:
                 continue
 
-            # Find row with highest val_auroc
-            idx = df['val_auroc'].idxmax()
+            # Filter to only rows where val_auroc < train_auroc (not overfitting)
+            if 'train_auroc' in df.columns:
+                valid_df = df[df['val_auroc'] <= df['train_auroc']]
+                if valid_df.empty:
+                    continue
+            else:
+                valid_df = df
+
+            # Find row with highest val_auroc among valid rows
+            idx = valid_df['val_auroc'].idxmax()
             val_auroc = df.loc[idx, 'val_auroc']
             test_auroc = df.loc[idx, 'test_auroc']
+            train_auroc = df.loc[idx, 'train_auroc'] if 'train_auroc' in df.columns else None
             epoch = df.loc[idx, 'epoch'] if 'epoch' in df.columns else idx
 
             if val_auroc > best_val_auroc:
