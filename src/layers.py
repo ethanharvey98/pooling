@@ -294,12 +294,13 @@ class ExactSm(Sm):
 
 class SmAP(torch.nn.Module):
     def __init__(
-        self, 
-        in_features: int, 
-        hidden_dim: int = 128, 
-        alpha: float = 0.5, 
-        num_steps: int = 10, 
+        self,
+        in_features: int,
+        hidden_dim: int = 128,
+        alpha: float = 0.5,
+        num_steps: int = 10,
         variant: str = 'early',
+        neighbors: int = 1,
     ):
         super().__init__()
         fc1 = torch.nn.Linear(in_features=in_features, out_features=hidden_dim)
@@ -312,7 +313,7 @@ class SmAP(torch.nn.Module):
             fc1 = torch.nn.utils.parametrizations.spectral_norm(fc1)
             fc2 = torch.nn.utils.parametrizations.spectral_norm(fc2)
         self.mlp = torch.nn.Sequential(fc1, torch.nn.Tanh(), fc2)
-        self.sm_layer = ApproxSm(alpha=alpha, learnable_alpha=True, num_steps=num_steps)
+        self.sm_layer = ApproxSm(alpha=alpha, learnable_alpha=True, num_steps=num_steps, neighbors=neighbors)
 
     def forward(
         self, 
