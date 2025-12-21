@@ -209,47 +209,85 @@ class Sm(torch.nn.Module):
 
 class ApproxSm(Sm):
     def __init__(
-        self, 
-        alpha: float = 0.5, 
-        learnable_alpha: bool = True, 
-        neighbors: int = 1, 
-        num_steps: int = 10, 
+        self,
+        alpha: float = 0.5,
+        learnable_alpha: bool = True,
+        neighbors: int = 1,
+        num_steps: int = 10,
         self_loop: bool = False,
+        use_matrix: bool = True,
     ):
         super().__init__(
-            alpha=alpha, 
-            learnable_alpha=learnable_alpha, 
-            neighbors=neighbors, 
-            self_loop=self_loop, 
+            alpha=alpha,
+            learnable_alpha=learnable_alpha,
+            neighbors=neighbors,
+            self_loop=self_loop,
         )
         self.num_steps = num_steps
+        self.use_matrix = use_matrix
+        self._cached_A = None
+        self._cached_length = None
 
-    def forward(
-        self, 
-        f: torch.Tensor, 
+    def _get_adjacency_matrix(
+        self,
+        length: int,
+        device: torch.device,
+        dtype: torch.dtype,
     ) -> torch.Tensor:
-        g = f.clone()
-        for _ in range(self.num_steps):
-            Ag = self._average_neighbors(g)
-            g = (1.0 - self.alpha) * f + self.alpha * Ag
-        return g
+        # Cache the adjacency matrix if length hasn't changed
+        if self._cached_A is not None and self._cached_length == length:
+            return self._cached_A.to(device=device, dtype=dtype)
 
-    def _average_neighbors(
-        self, 
-        g: torch.Tensor, 
+        # Build normalized adjacency matrix
+        A = torch.zeros((length, length), device=device, dtype=dtype)
+        if self.self_loop:
+            A.fill_diagonal_(1.0)
+        for k in range(1, self.neighbors + 1):
+            if k < length:
+                A[range(k, length), range(length - k)] = 1.0  # below diagonal
+                A[range(length - k), range(k, length)] = 1.0  # above diagonal
+        # Row-normalize
+        rowsum = A.sum(dim=1, keepdim=True)
+        A = A / rowsum.clamp_min(1e-20)
+
+        self._cached_A = A
+        self._cached_length = length
+        return A
+
+    def _average_neighbors_loop(
+        self,
+        g: torch.Tensor,
     ) -> torch.Tensor:
+        """Original loop-based implementation."""
         agg = torch.zeros_like(g)
         deg = torch.zeros((len(g), 1), device=g.device, dtype=g.dtype)
         if self.self_loop:
             agg += g
             deg += 1.0
         for k in range(1, self.neighbors + 1):
-            agg[k:] += g[:-k]
-            deg[k:] += 1.0
-            agg[:-k] += g[k:]
-            deg[:-k] += 1.0
+            if k < len(g):
+                agg[k:] += g[:-k]
+                deg[k:] += 1.0
+                agg[:-k] += g[k:]
+                deg[:-k] += 1.0
         avg = agg / deg.clamp_min(1e-20)
         return avg
+
+    def forward(
+        self,
+        f: torch.Tensor,
+    ) -> torch.Tensor:
+        g = f.clone()
+        if self.use_matrix:
+            A = self._get_adjacency_matrix(len(f), f.device, f.dtype)
+            for _ in range(self.num_steps):
+                Ag = A @ g
+                g = (1.0 - self.alpha) * f + self.alpha * Ag
+        else:
+            for _ in range(self.num_steps):
+                Ag = self._average_neighbors_loop(g)
+                g = (1.0 - self.alpha) * f + self.alpha * Ag
+        return g
 
 class ExactSm(Sm):
     def __init__(
