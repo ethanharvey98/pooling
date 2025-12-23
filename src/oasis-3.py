@@ -35,9 +35,9 @@ if __name__=='__main__':
     val_data = torch.load(f'{args.dataset_dir}/val.pth', map_location=torch.device('cpu'), weights_only=False)
     test_data = torch.load(f'{args.dataset_dir}/test.pth', map_location=torch.device('cpu'), weights_only=False)
     
-    train_dataset = datasets.MILDataset(train_data['X'], train_data['lengths'], train_data['y'])
-    val_dataset = datasets.MILDataset(val_data['X'], val_data['lengths'], val_data['y'])
-    test_dataset = datasets.MILDataset(test_data['X'], test_data['lengths'], test_data['y'])
+    train_dataset = datasets.MILTensorDataset(train_data['X'], train_data['lengths'], train_data['y'])
+    val_dataset = datasets.MILTensorDataset(val_data['X'], val_data['lengths'], val_data['y'])
+    test_dataset = datasets.MILTensorDataset(test_data['X'], test_data['lengths'], test_data['y'])
     
     shuffled_train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=utils.collate_fn, drop_last=True)
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, collate_fn=utils.collate_fn)

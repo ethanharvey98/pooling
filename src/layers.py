@@ -85,7 +85,10 @@ class InstanceConv1d(torch.nn.Module):
         x: torch.Tensor, 
         lengths: Tuple[int, ...],
     ) -> torch.Tensor:
-        out = torch.cat([self.conv(x_i.T.unsqueeze(0)).squeeze(0).T for x_i in torch.split(x, lengths)])
+        out = torch.cat([
+            self.conv(x_i.transpose(0, 1).unsqueeze(0)).squeeze(0).transpose(0, 1)
+            for x_i in torch.split(x, lengths)
+        ])
         return out
     
 class PPEG(torch.nn.Module):
@@ -116,7 +119,7 @@ class PPEG(torch.nn.Module):
         # Fuse together different spatial information
         out = x + self.proj1(x, lengths) + self.proj2(x, lengths) + self.proj3(x, lengths)
         out = torch.cat([
-            torch.cat((cls_token[i][None,:], x_i))
+            torch.cat((cls_token[i].unsqueeze(0), out_i))
             for i, out_i in enumerate(torch.split(out, lengths))
         ])
         return out
@@ -218,10 +221,10 @@ class ApproxSm(Sm):
         use_matrix: bool = True,
     ):
         super().__init__(
-            alpha=alpha,
-            learnable_alpha=learnable_alpha,
-            neighbors=neighbors,
-            self_loop=self_loop,
+            alpha = alpha, 
+            learnable_alpha = learnable_alpha, 
+            neighbors = neighbors, 
+            self_loop = self_loop, 
         )
         self.num_steps = num_steps
         self.use_matrix = use_matrix
@@ -298,10 +301,10 @@ class ExactSm(Sm):
         self_loop: bool = False,
     ):
         super().__init__(
-            alpha=alpha, 
-            learnable_alpha=learnable_alpha, 
-            neighbors=neighbors, 
-            self_loop=self_loop, 
+            alpha = alpha, 
+            learnable_alpha = learnable_alpha, 
+            neighbors = neighbors, 
+            self_loop = self_loop, 
         )
 
     def forward(
