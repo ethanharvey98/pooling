@@ -44,11 +44,12 @@ if __name__ == '__main__':
     # Transform: RSNA is (num_slices, H, W), need to add channel dim
     # OASIS-3 permutes (3, 0, 1, 2) because it has shape (D, H, W, C)
     # RSNA has shape (num_slices, H, W) so we just add a channel dim
+    resize_size = 1024 if args.encoder == 'MedSAM' else 224
     transform = torchvision.transforms.Compose([
         lambda path: utils.read_npz(path),
         lambda image: image.unsqueeze(1),  # (D, H, W) -> (D, 1, H, W)
         lambda image: utils.pad_image(image),
-        torchvision.transforms.Resize(size=(1024, 1024)),
+        torchvision.transforms.Resize(size=(resize_size, resize_size)),
     ])
 
     train_dataset = datasets.MILPathDataset(train_df.path.values, torch.tensor(train_df[['scan_label']].values, dtype=torch.float32), transform)
@@ -66,7 +67,7 @@ if __name__ == '__main__':
         lambda path: utils.read_npz(path),
         lambda image: image.unsqueeze(1),  # (D, H, W) -> (D, 1, H, W)
         lambda image: utils.pad_image(image),
-        torchvision.transforms.Resize(size=(1024, 1024)),
+        torchvision.transforms.Resize(size=(resize_size, resize_size)),
         lambda image: (image - mean.view(1, -1, 1, 1)) / std.view(1, -1, 1, 1),
     ])
 
