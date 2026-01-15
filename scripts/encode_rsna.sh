@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --array=0-2%3
 #SBATCH --error=/cluster/tufts/hugheslab/dloevl01/slurmlog/err/log_%j.err
-#SBATCH --gres=gpu:a100:1
+#SBATCH --gres=gpu:rtx_a6000:1
 #SBATCH --mem=64g
 #SBATCH --ntasks=4
 #SBATCH --output=/cluster/tufts/hugheslab/dloevl01/slurmlog/out/log_%j.out
