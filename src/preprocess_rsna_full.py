@@ -6,14 +6,13 @@ Usage:
     python preprocess_rsna_full.py \
         --dicom_dir='/media/M2SSD/gen_models_data/stage_2_train' \
         --numpy_dir='/media/M2SSD/gen_models_data/RSNA_ICH_numpy_full' \
-        --labels_csv='/media/M2SSD/gen_models_data/stage_2_train.csv'
+        --start=0 --stop=2175
 """
 import argparse
 import os
 from collections import defaultdict
 
 import numpy as np
-import pandas as pd
 import pydicom
 from tqdm import tqdm
 
@@ -31,20 +30,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Preprocess full RSNA ICH dataset")
     parser.add_argument("--dicom_dir", help="Directory containing DICOM files", type=str, required=True)
     parser.add_argument("--numpy_dir", help="Directory to save numpy dataset", type=str, required=True)
-    parser.add_argument("--labels_csv", help="Path to RSNA labels CSV (stage_2_train.csv)", type=str, required=True)
+    parser.add_argument("--start", default=0, help="Start index (default: 0)", type=int)
+    parser.add_argument("--stop", default=None, help="End index (default: None, process all)", type=int)
     args = parser.parse_args()
 
     os.makedirs(args.numpy_dir, exist_ok=True)
-
-    # Load labels
-    print("Loading labels...")
-    labels_df = pd.read_csv(args.labels_csv)
-    # Parse slice_id and label_type from ID column (format: ID_xxx_labeltype)
-    labels_df['slice_id'] = labels_df['ID'].apply(lambda x: '_'.join(x.split('_')[:2]))
-    labels_df['label_type'] = labels_df['ID'].apply(lambda x: x.split('_')[2])
-    # Pivot to get one row per slice with all label types as columns
-    labels_pivot = labels_df.pivot(index='slice_id', columns='label_type', values='Label')
-    labels_pivot = labels_pivot.reset_index()
 
     # Get all DICOM files
     print("Scanning DICOM directory...")
@@ -68,9 +58,15 @@ if __name__ == "__main__":
 
     print(f"Found {len(scan_slices)} unique scans")
 
+    # Convert to list for indexing
+    scan_ids = list(scan_slices.keys())
+    stop = args.stop if args.stop is not None else len(scan_ids)
+    scan_ids_subset = scan_ids[args.start:stop]
+    print(f"Processing scans {args.start} to {stop} ({len(scan_ids_subset)} scans)")
+
     # Process each scan
-    print("Processing scans...")
-    for scan_id, slices in tqdm(scan_slices.items(), desc="Processing scans"):
+    for scan_id in tqdm(scan_ids_subset, desc="Processing scans"):
+        slices = scan_slices[scan_id]
         # Sort by z_position ASCENDING (bottom to top)
         # Lower z = skull base (bottom), Higher z = vertex (top)
         slices_sorted = sorted(slices, key=lambda x: x[1])  # ascending z_position
