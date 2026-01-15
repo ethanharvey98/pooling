@@ -80,5 +80,6 @@ if __name__=='__main__':
         
         model_history_df.to_csv(f'{args.experiments_dir}/{args.model_name}.csv')
     
-        if args.save and epoch == model_history_df.val_auroc.idxmax():
-            torch.save(model.state_dict(), f'{args.experiments_dir}/{args.model_name}.pt')
+        val_auroc_series = model_history_df[model_history_df.train_auroc > model_history_df.val_auroc].val_auroc
+        if args.save and epoch == (val_auroc_series.idxmax() if not val_auroc_series.empty else None):
+            torch.save(model.state_dict(), f"{args.experiments_dir}/{args.model_name}.pt")
