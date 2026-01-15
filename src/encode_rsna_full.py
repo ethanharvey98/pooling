@@ -28,6 +28,10 @@ if __name__ == '__main__':
     labels_df['scan_label'] = labels_df['Any'].apply(lambda x: 1 if any(ast.literal_eval(x)) else 0)
     labels_df['path'] = labels_df['Study ID'].apply(lambda x: f'{args.numpy_dir}/{x}.npz')
 
+    # Filter to only scans with existing npz files
+    labels_df = labels_df[labels_df['path'].apply(os.path.exists)]
+    print(f"Scans with npz files: {len(labels_df)}")
+
     # Train/val/test split (4/6 train, 1/6 val, 1/6 test)
     ids, id_labels = labels_df['Study ID'], labels_df['scan_label']
     train_and_val_ids, test_ids, train_and_val_id_labels, test_id_labels = train_test_split(ids, id_labels, test_size=1/6, random_state=args.seed, stratify=id_labels)
