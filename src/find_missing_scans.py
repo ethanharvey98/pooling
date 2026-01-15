@@ -50,21 +50,27 @@ if __name__ == "__main__":
         scan_id = row["Study ID"]
         paths = ast.literal_eval(row["paths"])
 
-        try:
-            images = []
-            for dcm_path in paths:
+        images = []
+        skipped_slices = []
+        for dcm_path in paths:
+            try:
                 dcm = pydicom.dcmread(dcm_path)
                 image = dcm.pixel_array.astype(np.float32)
                 image = image * float(dcm.RescaleSlope) + float(dcm.RescaleIntercept)
                 image = ct.strip_skull(image)
                 images.append(image)
+            except Exception as e:
+                skipped_slices.append((dcm_path, str(e)))
 
+        if images:
             volume = np.array(images)  # (S, H, W)
             volume = volume.transpose(1, 2, 0)  # (H, W, S)
             volume = volume[np.newaxis, ...]  # (1, H, W, S)
             np.savez(f"{args.numpy_dir}/{scan_id}.npz", volume)
-        except Exception as e:
-            failed_scans.append((scan_id, str(e)))
+            if skipped_slices:
+                failed_scans.append((scan_id, f"saved {len(images)} slices, skipped {len(skipped_slices)}"))
+        else:
+            failed_scans.append((scan_id, "all slices failed"))
 
     print(f"\nDone! Successfully processed: {len(missing_df) - len(failed_scans)}")
     if failed_scans:
