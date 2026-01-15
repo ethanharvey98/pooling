@@ -8,6 +8,14 @@ import torchvision
 import datasets
 import utils
 
+class Squeeze(torch.nn.Module):
+    def __init__(self, dim=None):
+        super().__init__()
+        self.dim = dim
+
+    def forward(self, x):
+        return x.squeeze() if self.dim is None else x.squeeze(self.dim)
+
 # python ../src/encode_oasis-3.py --encoded_dir='/cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_CT/ViT_B_16/seed=1001' --encoder='ViT-B/16' --numpy_dir='/cluster/tufts/hugheslab/datasets/OASIS-3_CT_numpy' --seed=1001
 # python ../src/encode_oasis-3.py --encoded_dir='/cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_CT/ViT_B_16/seed=2001' --encoder='ViT-B/16' --numpy_dir='/cluster/tufts/hugheslab/datasets/OASIS-3_CT_numpy' --seed=2001
 # python ../src/encode_oasis-3.py --encoded_dir='/cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_CT/ViT_B_16/seed=3001' --encoder='ViT-B/16' --numpy_dir='/cluster/tufts/hugheslab/datasets/OASIS-3_CT_numpy' --seed=3001
@@ -108,7 +116,14 @@ if __name__ == '__main__':
         model = medsam.image_encoder
         model.patch_embed.proj.weight.data = model.patch_embed.proj.weight.data.sum(dim=1, keepdim=True)
         model.patch_embed.proj.in_channels = 1
-        model.neck.append(torch.nn.AdaptiveAvgPool2d(output_size=(1, 1)))
+        #model.neck.extend([
+        #    torch.nn.AdaptiveAvgPool2d(output_size=(1, 1)),
+        #    Squeeze(dim=(2, 3)),
+        #])
+        model.neck = torch.nn.Sequential(
+            torch.nn.AdaptiveAvgPool2d(output_size=(1, 1)),
+            Squeeze(dim=(2, 3)),
+        )
         
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     print(device)
@@ -118,11 +133,19 @@ if __name__ == '__main__':
     
     for image, length, label in train_dataset:
         
+        #embeddings = torch.cat([
+        #    utils.encode_image(model, image[:,c].unsqueeze(1)) 
+        #    for c in range(image.shape[1])
+        #], dim=-1)
         embeddings = torch.cat([
-            utils.encode_image(model, image[:,c].unsqueeze(1)) 
+            torch.cat([
+                utils.encode_image(model, image[s:s+5,c].unsqueeze(1))
+                for s in range(0, image.shape[0], 5)
+            ], dim=0)
             for c in range(image.shape[1])
         ], dim=-1)
-        
+        print(embeddings.shape)
+
         X.append(embeddings)
         lengths.append(length)
         y.append(label)
@@ -137,8 +160,15 @@ if __name__ == '__main__':
     
     for image, length, label in val_dataset:
         
+        #embeddings = torch.cat([
+        #    utils.encode_image(model, image[:,c].unsqueeze(1)) 
+        #    for c in range(image.shape[1])
+        #], dim=-1)
         embeddings = torch.cat([
-            utils.encode_image(model, image[:,c].unsqueeze(1)) 
+            torch.cat([
+                utils.encode_image(model, image[s:s+5,c].unsqueeze(1))
+                for s in range(0, image.shape[0], 5)
+            ], dim=0)
             for c in range(image.shape[1])
         ], dim=-1)
         
@@ -156,8 +186,15 @@ if __name__ == '__main__':
     
     for image, length, label in test_dataset:
         
+        #embeddings = torch.cat([
+        #    utils.encode_image(model, image[:,c].unsqueeze(1)) 
+        #    for c in range(image.shape[1])
+        #], dim=-1)
         embeddings = torch.cat([
-            utils.encode_image(model, image[:,c].unsqueeze(1)) 
+            torch.cat([
+                utils.encode_image(model, image[s:s+5,c].unsqueeze(1))
+                for s in range(0, image.shape[0], 5)
+            ], dim=0)
             for c in range(image.shape[1])
         ], dim=-1)
         

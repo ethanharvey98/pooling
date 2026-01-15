@@ -2,6 +2,8 @@ import argparse
 import os
 import numpy as np
 # Importing neuroimaging package(s)
+os.environ['ITK_GLOBAL_DEFAULT_NUMBER_OF_THREADS'] = '1'
+os.environ['ANTS_RANDOM_SEED'] = '42'
 import ants
 # Importing our custom module(s)
 import ct

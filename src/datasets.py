@@ -24,19 +24,19 @@ class MILPathDataset(torch.utils.data.Dataset):
         self, 
         index: int,
     ) -> Tuple[torch.Tensor, int, torch.Tensor]:
-        X = self.transform(self.path[index])
-        return X, len(X), self.y[index]
+        x = self.transform(self.path[index])
+        return x, len(x), self.y[index]
     
 class MILTensorDataset(torch.utils.data.Dataset):
     def __init__(
         self, 
-        X: torch.Tensor, 
+        x: torch.Tensor, 
         lengths: Tuple, 
         y: torch.Tensor,
     ):
         super().__init__()
-        self.X = X
-        self.X_split = torch.split(X, lengths)
+        self.x = x
+        self.x_split = torch.split(x, lengths)
         self.lengths = lengths
         self.y = y
 
@@ -49,47 +49,47 @@ class MILTensorDataset(torch.utils.data.Dataset):
         self, 
         index: int,
     ) -> Tuple[torch.Tensor, int, torch.Tensor]:
-        return self.X_split[index], self.lengths[index], self.y[index]
+        return self.x_split[index], self.lengths[index], self.y[index]
 
 class ShiftedMeanMILDataset(torch.utils.data.Dataset):
     def __init__(
         self, 
-        N: int, 
-        R: int = 3, 
-        S_low: int = 15, 
-        S_high: int = 45, 
-        K: int = 1, 
-        M: int = 768, 
+        n: int, 
+        r: int = 12, 
+        s_low: int = 20, 
+        s_high: int = 60, 
+        k: int = 1, 
+        m: int = 768, 
         p_y1: float = 0.5, 
-        Delta: float = 1.0, 
+        delta: float = 1.0, 
         mu: float = 0.0, 
         sigma: float = 1.0, 
         seed: int = 42,
     ):
         super().__init__()
         
-        self.N = N
-        self.R = R
-        self.S_low = S_low
-        self.S_high = S_high
-        self.K = K
-        self.M = M
+        self.n = n
+        self.r = r
+        self.s_low = s_low
+        self.s_high = s_high
+        self.k = k
+        self.m = m
         self.p_y1 = p_y1
-        self.Delta = Delta
+        self.delta = delta
         self.mu = mu
         self.sigma = sigma
         self.seed = seed
         
         self.generator = torch.Generator().manual_seed(self.seed)
-        self.lengths = tuple(torch.randint(self.S_low, self.S_high + 1, (self.N,), generator=self.generator).tolist())
-        self.H = self.mu + self.sigma * torch.randn(sum(self.lengths), self.M, generator=self.generator)
-        self.u = torch.cat([torch.randint(0, S_i - self.R + 1, (1,), generator=self.generator) for S_i in self.lengths])
-        self.y = torch.bernoulli(self.p_y1 * torch.ones(size=(self.N,)), generator=self.generator).int().reshape(-1, 1).float()
-        self.H_split = torch.split(self.H, self.lengths)
+        self.lengths = tuple(torch.randint(self.s_low, self.s_high + 1, (self.n,), generator=self.generator).tolist())
+        self.h = self.mu + self.sigma * torch.randn(sum(self.lengths), self.m, generator=self.generator)
+        self.u = torch.cat([torch.randint(0, s_i - self.r + 1, (1,), generator=self.generator) for s_i in self.lengths])
+        self.y = torch.bernoulli(self.p_y1 * torch.ones(size=(self.n,)), generator=self.generator).int().reshape(-1, 1).float()
+        self.h_split = torch.split(self.h, self.lengths)
         
-        for i, H_i in enumerate(self.H_split):
+        for i, h_i in enumerate(self.h_split):
             if self.y[i] == 1:
-                H_i[self.u[i]:self.u[i] + self.R, 0:self.K] += self.Delta
+                h_i[self.u[i]:self.u[i] + self.r, 0:self.k] += self.delta
                 
     def __len__(
         self,
@@ -100,18 +100,17 @@ class ShiftedMeanMILDataset(torch.utils.data.Dataset):
         self, 
         index: int,
     ) -> Tuple[torch.Tensor, int, torch.Tensor]:
-        return self.H_split[index], self.lengths[index], self.y[index]
+        return self.h_split[index], self.lengths[index], self.y[index]
 
     def p_y1_given_h(
         self, 
         index: int,
     ) -> torch.Tensor:
-        h = self.H_split[index][:, 0:self.K]
-        S_i = self.lengths[index]
-        p_h_given_y0 = torch.prod(torch.stack([utils.normal_pdf(h[j]) for j in range(S_i)])) * (1.0 - self.p_y1)
-        p_u = (1 / (S_i - self.R + 1)) * torch.ones(size=(S_i - self.R + 1,))
-        # p_h_given_u_y1 has shape: (S_i - R + 1, S_i, K)
-        p_h_given_u_y1 = torch.stack([torch.stack([torch.stack([utils.normal_pdf(h[j, k], self.mu + self.Delta) if j >= u and j < (u + self.R) else utils.normal_pdf(h[j, k]) for k in range(self.K)]) for j in range(S_i)]) for u in range(S_i - self.R + 1)])
+        h = self.h_split[index][:, 0:self.k]
+        s_i = self.lengths[index]
+        p_h_given_y0 = torch.prod(torch.stack([utils.normal_pdf(h[j]) for j in range(s_i)])) * (1.0 - self.p_y1)
+        p_u = (1 / (s_i - self.r + 1)) * torch.ones(size=(s_i - self.r + 1,))
+        p_h_given_u_y1 = torch.stack([torch.stack([torch.stack([utils.normal_pdf(h[j, k], self.mu + self.delta) if j >= u and j < (u + self.r) else utils.normal_pdf(h[j, k]) for k in range(self.k)]) for j in range(s_i)]) for u in range(s_i - self.r + 1)])
         p_h_given_y1 = torch.sum(torch.prod(torch.prod(p_h_given_u_y1, dim=-1), dim=-1) * p_u, dim=-1) * self.p_y1
         p_y1_given_h = p_h_given_y1 / (p_h_given_y0 + p_h_given_y1)
         return p_y1_given_h
