@@ -53,6 +53,10 @@ if __name__ == "__main__":
             image = ct.strip_skull(image)
             images.append(image)
 
-        np.savez(f"{args.numpy_dir}/{scan_id}.npz", np.array(images))
+        # Stack to (S, H, W) then reshape to (C, H, W, S) where C=1
+        volume = np.array(images)  # (S, H, W)
+        volume = volume.transpose(1, 2, 0)  # (H, W, S)
+        volume = volume[np.newaxis, ...]  # (1, H, W, S)
+        np.savez(f"{args.numpy_dir}/{scan_id}.npz", volume)
 
     print("Done!")
