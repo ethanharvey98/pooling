@@ -48,7 +48,7 @@ if __name__ == '__main__':
     resize_size = 1024 if args.encoder == 'MedSAM' else 224
     transform = torchvision.transforms.Compose([
         lambda path: utils.read_npz(path),
-        lambda image: image.unsqueeze(1),  # (D, H, W) -> (D, 1, H, W)
+        lambda image: image.permute(3, 0, 1, 2),  # (C, H, W, S) -> (S, C, H, W)
         lambda image: utils.pad_image(image),
         torchvision.transforms.Resize(size=(resize_size, resize_size)),
     ])
@@ -66,7 +66,7 @@ if __name__ == '__main__':
 
     transform = torchvision.transforms.Compose([
         lambda path: utils.read_npz(path),
-        lambda image: image.unsqueeze(1),  # (D, H, W) -> (D, 1, H, W)
+        lambda image: image.permute(3, 0, 1, 2),  # (C, H, W, S) -> (S, C, H, W)
         lambda image: utils.pad_image(image),
         torchvision.transforms.Resize(size=(resize_size, resize_size)),
         lambda image: (image - mean.view(1, -1, 1, 1)) / std.view(1, -1, 1, 1),
