@@ -175,7 +175,7 @@ def load_scan_slices(numpy_dir, scan_id, window_start, window_end):
     return slices
 
 
-def visualize_scan(slice_labels, attention_weights, scan_id, output_path, window_start, window_end, numpy_dir):
+def visualize_scan(slice_labels, attention_weights, scan_id, output_path, window_start, window_end, numpy_dir, max_slices=15):
     """Create visualization with two rows: ground truth overlay and attention overlay on CT slices."""
     # Extract window
     window_labels = slice_labels[window_start:window_end]
@@ -186,11 +186,20 @@ def visualize_scan(slice_labels, attention_weights, scan_id, output_path, window
 
     n_slices = len(window_labels)
 
+    # Sample every Nth slice if we have more than max_slices
+    if n_slices > max_slices:
+        step = n_slices / max_slices
+        sample_indices = [int(i * step) for i in range(max_slices)]
+    else:
+        sample_indices = list(range(n_slices))
+
+    n_display = len(sample_indices)
+
     # Load CT slices
     ct_slices = load_scan_slices(numpy_dir, scan_id, window_start, window_end)
 
     # Create figure with 2 rows of subplots
-    fig, axes = plt.subplots(2, n_slices, figsize=(n_slices * 1.5, 4))
+    fig, axes = plt.subplots(2, n_display, figsize=(n_display * 1.5, 4))
 
     # Normalize CT values for display (clip to brain window)
     ct_min, ct_max = -100, 300
@@ -198,13 +207,13 @@ def visualize_scan(slice_labels, attention_weights, scan_id, output_path, window
     ct_slices_norm = (ct_slices_norm - ct_min) / (ct_max - ct_min)
 
     # Row 1: CT slices with red border for positive ground truth
-    for i in range(n_slices):
-        ax = axes[0, i] if n_slices > 1 else axes[0]
-        ax.imshow(ct_slices_norm[i], cmap='gray', vmin=0, vmax=1)
+    for display_idx, slice_idx in enumerate(sample_indices):
+        ax = axes[0, display_idx] if n_display > 1 else axes[0]
+        ax.imshow(ct_slices_norm[slice_idx], cmap='gray', vmin=0, vmax=1)
 
         # Add red shading overlay for positive slices
-        if window_labels[i] == 1:
-            overlay = np.ones((*ct_slices_norm[i].shape, 4))
+        if window_labels[slice_idx] == 1:
+            overlay = np.ones((*ct_slices_norm[slice_idx].shape, 4))
             overlay[:, :, 0] = 1  # Red
             overlay[:, :, 1] = 0  # Green
             overlay[:, :, 2] = 0  # Blue
@@ -213,38 +222,38 @@ def visualize_scan(slice_labels, attention_weights, scan_id, output_path, window
 
         ax.set_xticks([])
         ax.set_yticks([])
-        ax.set_xlabel(f'{window_start + i + 1}', fontsize=8)
+        ax.set_xlabel(f'{window_start + slice_idx + 1}', fontsize=8)
 
         # Add border
         for spine in ax.spines.values():
-            spine.set_edgecolor('red' if window_labels[i] == 1 else 'black')
-            spine.set_linewidth(2 if window_labels[i] == 1 else 0.5)
+            spine.set_edgecolor('red' if window_labels[slice_idx] == 1 else 'black')
+            spine.set_linewidth(2 if window_labels[slice_idx] == 1 else 0.5)
 
-    axes[0, 0].set_ylabel('Ground Truth', fontsize=10) if n_slices > 1 else axes[0].set_ylabel('Ground Truth', fontsize=10)
+    axes[0, 0].set_ylabel('Ground Truth', fontsize=10) if n_display > 1 else axes[0].set_ylabel('Ground Truth', fontsize=10)
 
     # Row 2: CT slices with attention heatmap overlay
     cmap = plt.cm.Reds
-    for i in range(n_slices):
-        ax = axes[1, i] if n_slices > 1 else axes[1]
-        ax.imshow(ct_slices_norm[i], cmap='gray', vmin=0, vmax=1)
+    for display_idx, slice_idx in enumerate(sample_indices):
+        ax = axes[1, display_idx] if n_display > 1 else axes[1]
+        ax.imshow(ct_slices_norm[slice_idx], cmap='gray', vmin=0, vmax=1)
 
         # Add attention heatmap overlay
-        overlay = np.ones((*ct_slices_norm[i].shape, 4))
+        overlay = np.ones((*ct_slices_norm[slice_idx].shape, 4))
         overlay[:, :, 0] = 1  # Red
         overlay[:, :, 1] = 0  # Green
         overlay[:, :, 2] = 0  # Blue
-        overlay[:, :, 3] = window_attention_norm[i] * 0.5  # Alpha based on attention
+        overlay[:, :, 3] = window_attention_norm[slice_idx] * 0.5  # Alpha based on attention
         ax.imshow(overlay)
 
         ax.set_xticks([])
         ax.set_yticks([])
-        ax.set_xlabel(f'{window_start + i + 1}', fontsize=8)
+        ax.set_xlabel(f'{window_start + slice_idx + 1}', fontsize=8)
 
         for spine in ax.spines.values():
             spine.set_edgecolor('black')
             spine.set_linewidth(0.5)
 
-    axes[1, 0].set_ylabel('Attention', fontsize=10) if n_slices > 1 else axes[1].set_ylabel('Attention', fontsize=10)
+    axes[1, 0].set_ylabel('Attention', fontsize=10) if n_display > 1 else axes[1].set_ylabel('Attention', fontsize=10)
 
     # Add colorbar for attention on the right side of the figure
     fig.subplots_adjust(right=0.9)
@@ -260,6 +269,36 @@ def visualize_scan(slice_labels, attention_weights, scan_id, output_path, window
     print(f"Saved visualization to {output_path}")
 
 
+def visualize_line_plot(slice_labels, attention_weights, scan_id, output_path):
+    """Create line plot showing ground truth labels and normalized attention for all slices."""
+    n_slices = len(slice_labels)
+    slice_numbers = np.arange(1, n_slices + 1)
+
+    # Normalize attention so max is 1
+    attention_norm = attention_weights / (attention_weights.max() + 1e-8)
+
+    fig, ax = plt.subplots(figsize=(12, 4))
+
+    # Plot ground truth labels
+    ax.plot(slice_numbers, slice_labels, 'r-', label='Ground Truth', linewidth=2, marker='o', markersize=3)
+
+    # Plot normalized attention
+    ax.plot(slice_numbers, attention_norm, 'b-', label='Attention (normalized)', linewidth=2, marker='s', markersize=3)
+
+    ax.set_xlabel('Slice Number', fontsize=12)
+    ax.set_ylabel('Value', fontsize=12)
+    ax.set_title(f'Scan: {scan_id} - Ground Truth vs Attention ({n_slices} slices)', fontsize=14)
+    ax.legend(loc='upper right', fontsize=10)
+    ax.set_xlim(1, n_slices)
+    ax.set_ylim(-0.05, 1.1)
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"Saved line plot to {output_path}")
+
+
 def main():
     parser = argparse.ArgumentParser(description='Visualize attention weights vs ground truth')
     parser.add_argument('--experiments_dir', required=True, help='Directory with experiment results')
@@ -272,6 +311,7 @@ def main():
     parser.add_argument('--output', default='attention_viz.png', help='Output image path')
     parser.add_argument('--scan_idx', type=int, default=0, help='Index of positive scan to visualize (among positive test scans)')
     parser.add_argument('--context', type=int, default=3, help='Number of context slices on each side')
+    parser.add_argument('--max_slices', type=int, default=15, help='Maximum number of slices to display in CT visualization')
     args = parser.parse_args()
 
     # Find and load the best model
@@ -319,9 +359,13 @@ def main():
     window_start, window_end = find_positive_window(slice_labels, context=args.context)
 
     if window_start is not None:
-        visualize_scan(slice_labels, scan_attention, scan_id, args.output, window_start, window_end, args.numpy_dir)
+        visualize_scan(slice_labels, scan_attention, scan_id, args.output, window_start, window_end, args.numpy_dir, args.max_slices)
     else:
         print("No positive slices found in this scan (unexpected for positive scan)")
+
+    # Save line plot for all slices
+    line_plot_path = args.output.replace('.png', '_lineplot.png')
+    visualize_line_plot(slice_labels, scan_attention, scan_id, line_plot_path)
 
 
 if __name__ == "__main__":
