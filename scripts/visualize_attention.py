@@ -270,17 +270,20 @@ def visualize_scan(slice_labels, attention_weights, scan_id, output_path, window
 
 
 def visualize_line_plot(slice_labels, attention_weights, scan_id, output_path):
-    """Create line plot showing ground truth labels and attention for all slices."""
+    """Create line plot showing ground truth labels and normalized attention for all slices."""
     n_slices = len(slice_labels)
     slice_numbers = np.arange(1, n_slices + 1)
+
+    # Normalize attention so max is 1
+    attention_norm = attention_weights / (attention_weights.max() + 1e-8)
 
     fig, ax = plt.subplots(figsize=(12, 4))
 
     # Plot ground truth labels
     ax.plot(slice_numbers, slice_labels, 'r-', label='Ground Truth', linewidth=2, marker='o', markersize=3)
 
-    # Plot attention weights (raw values)
-    ax.plot(slice_numbers, attention_weights, 'b-', label='Attention', linewidth=2, marker='s', markersize=3)
+    # Plot normalized attention
+    ax.plot(slice_numbers, attention_norm, 'b-', label='Attention (normalized)', linewidth=2, marker='s', markersize=3)
 
     ax.set_xlabel('Slice Number', fontsize=12)
     ax.set_ylabel('Value', fontsize=12)
