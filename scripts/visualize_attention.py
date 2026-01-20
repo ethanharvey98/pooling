@@ -165,8 +165,18 @@ def find_positive_window(slice_labels, context=3):
     return window_start, window_end
 
 
-def visualize_scan(slice_labels, attention_weights, scan_id, output_path, window_start, window_end):
-    """Create visualization with two rows: ground truth and attention heatmap."""
+def load_scan_slices(numpy_dir, scan_id, window_start, window_end):
+    """Load the CT slices for visualization."""
+    path = f'{numpy_dir}/{scan_id}.npz'
+    data = np.load(path)['arr_0']  # (1, H, W, S)
+    # Extract slices for the window
+    slices = data[0, :, :, window_start:window_end]  # (H, W, n_slices)
+    slices = np.transpose(slices, (2, 0, 1))  # (n_slices, H, W)
+    return slices
+
+
+def visualize_scan(slice_labels, attention_weights, scan_id, output_path, window_start, window_end, numpy_dir):
+    """Create visualization with two rows: ground truth overlay and attention overlay on CT slices."""
     # Extract window
     window_labels = slice_labels[window_start:window_end]
     window_attention = attention_weights[window_start:window_end]
@@ -176,46 +186,75 @@ def visualize_scan(slice_labels, attention_weights, scan_id, output_path, window
 
     n_slices = len(window_labels)
 
-    fig, axes = plt.subplots(2, 1, figsize=(max(12, n_slices * 0.8), 4))
+    # Load CT slices
+    ct_slices = load_scan_slices(numpy_dir, scan_id, window_start, window_end)
 
-    # Row 1: Ground truth labels (shaded red for positive)
-    ax1 = axes[0]
-    for i, label in enumerate(window_labels):
-        color = 'red' if label == 1 else 'lightgray'
-        alpha = 0.3 if label == 1 else 0.3
-        ax1.add_patch(plt.Rectangle((i, 0), 1, 1, facecolor=color, edgecolor='black', linewidth=0.5, alpha=alpha))
+    # Create figure with 2 rows of subplots
+    fig, axes = plt.subplots(2, n_slices, figsize=(n_slices * 1.5, 4))
 
-    ax1.set_xlim(0, n_slices)
-    ax1.set_ylim(0, 1)
-    ax1.set_aspect('equal')
-    ax1.set_xticks(np.arange(n_slices) + 0.5)
-    ax1.set_xticklabels([str(window_start + i + 1) for i in range(n_slices)], fontsize=8)
-    ax1.set_yticks([])
-    ax1.set_title('Ground Truth (Red = Positive Slice)', fontsize=12)
+    # Normalize CT values for display (clip to brain window)
+    ct_min, ct_max = -100, 300
+    ct_slices_norm = np.clip(ct_slices, ct_min, ct_max)
+    ct_slices_norm = (ct_slices_norm - ct_min) / (ct_max - ct_min)
 
-    # Row 2: Attention heatmap
-    ax2 = axes[1]
+    # Row 1: CT slices with red border for positive ground truth
+    for i in range(n_slices):
+        ax = axes[0, i] if n_slices > 1 else axes[0]
+        ax.imshow(ct_slices_norm[i], cmap='gray', vmin=0, vmax=1)
+
+        # Add red shading overlay for positive slices
+        if window_labels[i] == 1:
+            overlay = np.ones((*ct_slices_norm[i].shape, 4))
+            overlay[:, :, 0] = 1  # Red
+            overlay[:, :, 1] = 0  # Green
+            overlay[:, :, 2] = 0  # Blue
+            overlay[:, :, 3] = 0.3  # Alpha
+            ax.imshow(overlay)
+
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_xlabel(f'{window_start + i + 1}', fontsize=8)
+
+        # Add border
+        for spine in ax.spines.values():
+            spine.set_edgecolor('red' if window_labels[i] == 1 else 'black')
+            spine.set_linewidth(2 if window_labels[i] == 1 else 0.5)
+
+    axes[0, 0].set_ylabel('Ground Truth', fontsize=10) if n_slices > 1 else axes[0].set_ylabel('Ground Truth', fontsize=10)
+
+    # Row 2: CT slices with attention heatmap overlay
     cmap = plt.cm.Reds
-    for i, attn in enumerate(window_attention_norm):
-        color = cmap(attn)
-        ax2.add_patch(plt.Rectangle((i, 0), 1, 1, facecolor=color, edgecolor='black', linewidth=0.5))
+    for i in range(n_slices):
+        ax = axes[1, i] if n_slices > 1 else axes[1]
+        ax.imshow(ct_slices_norm[i], cmap='gray', vmin=0, vmax=1)
 
-    ax2.set_xlim(0, n_slices)
-    ax2.set_ylim(0, 1)
-    ax2.set_aspect('equal')
-    ax2.set_xticks(np.arange(n_slices) + 0.5)
-    ax2.set_xticklabels([str(window_start + i + 1) for i in range(n_slices)], fontsize=8)
-    ax2.set_yticks([])
-    ax2.set_title('Attention Weights (Normalized for Window)', fontsize=12)
+        # Add attention heatmap overlay
+        overlay = np.ones((*ct_slices_norm[i].shape, 4))
+        overlay[:, :, 0] = 1  # Red
+        overlay[:, :, 1] = 0  # Green
+        overlay[:, :, 2] = 0  # Blue
+        overlay[:, :, 3] = window_attention_norm[i] * 0.5  # Alpha based on attention
+        ax.imshow(overlay)
 
-    # Add colorbar for attention
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_xlabel(f'{window_start + i + 1}', fontsize=8)
+
+        for spine in ax.spines.values():
+            spine.set_edgecolor('black')
+            spine.set_linewidth(0.5)
+
+    axes[1, 0].set_ylabel('Attention', fontsize=10) if n_slices > 1 else axes[1].set_ylabel('Attention', fontsize=10)
+
+    # Add colorbar for attention on the right side of the figure
+    fig.subplots_adjust(right=0.9)
+    cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.3])  # [left, bottom, width, height]
     sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(0, 1))
     sm.set_array([])
-    cbar = plt.colorbar(sm, ax=ax2, orientation='vertical', fraction=0.02, pad=0.02)
+    cbar = fig.colorbar(sm, cax=cbar_ax)
     cbar.set_label('Attention', fontsize=10)
 
     plt.suptitle(f'Scan: {scan_id} (Slices {window_start+1}-{window_end})', fontsize=14)
-    plt.tight_layout()
     plt.savefig(output_path, dpi=150, bbox_inches='tight')
     plt.close()
     print(f"Saved visualization to {output_path}")
@@ -280,7 +319,7 @@ def main():
     window_start, window_end = find_positive_window(slice_labels, context=args.context)
 
     if window_start is not None:
-        visualize_scan(slice_labels, scan_attention, scan_id, args.output, window_start, window_end)
+        visualize_scan(slice_labels, scan_attention, scan_id, args.output, window_start, window_end, args.numpy_dir)
     else:
         print("No positive slices found in this scan (unexpected for positive scan)")
 
