@@ -268,32 +268,34 @@ def visualize_line_plot(slice_labels, attention_weights, scan_id, output_path):
     n_slices = len(slice_labels)
     slice_numbers = np.arange(1, n_slices + 1)
 
-    # Get attention range for aligning axes
+    # Get attention range for aligning axes (with padding for whitespace)
     attn_min = attention_weights.min()
     attn_max = attention_weights.max()
+    attn_range = attn_max - attn_min
+    attn_padding = attn_range * 0.05  # 5% padding
 
     fig, ax1 = plt.subplots(figsize=(12, 4))
 
     # Pastel colors with transparency
     gt_color = '#FF6B6B'  # Pastel red
-    attn_color = '#4ECDC4'  # Pastel teal
+    attn_color = '#6BA3FF'  # Pastel blue
 
-    # Plot ground truth labels on left y-axis
-    ax1.plot(slice_numbers, slice_labels, color=gt_color, linewidth=2.5, alpha=0.8, label='Ground Truth')
-    ax1.plot(slice_numbers, slice_labels, color='black', linewidth=0.5, alpha=0.3)  # Black outline
+    # Plot ground truth labels on left y-axis (black outline first, then color on top)
+    ax1.plot(slice_numbers, slice_labels, color='black', linewidth=3.5, alpha=0.8)  # Black outline
+    ax1.plot(slice_numbers, slice_labels, color=gt_color, linewidth=2, alpha=0.8, label='Ground Truth')
     ax1.set_xlabel('Slice Number', fontsize=12)
     ax1.set_ylabel('Ground Truth', fontsize=12, color=gt_color)
     ax1.tick_params(axis='y', labelcolor=gt_color)
     ax1.set_xlim(1, n_slices)
-    ax1.set_ylim(0, 1)
+    ax1.set_ylim(-0.05, 1.05)  # Add whitespace above 1 and below 0
 
-    # Create second y-axis for attention
+    # Create second y-axis for attention (black outline first, then color on top)
     ax2 = ax1.twinx()
-    ax2.plot(slice_numbers, attention_weights, color=attn_color, linewidth=2.5, alpha=0.8, label='Attention')
-    ax2.plot(slice_numbers, attention_weights, color='black', linewidth=0.5, alpha=0.3)  # Black outline
+    ax2.plot(slice_numbers, attention_weights, color='black', linewidth=3.5, alpha=0.8)  # Black outline
+    ax2.plot(slice_numbers, attention_weights, color=attn_color, linewidth=2, alpha=0.8, label='Attention')
     ax2.set_ylabel('Attention', fontsize=12, color=attn_color)
     ax2.tick_params(axis='y', labelcolor=attn_color)
-    ax2.set_ylim(attn_min, attn_max)  # Align 0 and 1 with left axis
+    ax2.set_ylim(attn_min - attn_padding, attn_max + attn_padding)  # Align with left axis padding
 
     # Combine legends
     lines1, labels1 = ax1.get_legend_handles_labels()
@@ -301,7 +303,6 @@ def visualize_line_plot(slice_labels, attention_weights, scan_id, output_path):
     ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper right', fontsize=10)
 
     ax1.set_title(f'Scan: {scan_id} - Ground Truth vs Attention ({n_slices} slices)', fontsize=14)
-    ax1.grid(True, alpha=0.3)
 
     plt.tight_layout()
     plt.savefig(output_path, dpi=150, bbox_inches='tight')
