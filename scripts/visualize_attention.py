@@ -175,7 +175,7 @@ def load_scan_slices(numpy_dir, scan_id, window_start, window_end):
     return slices
 
 
-def visualize_scan(slice_labels, attention_weights, scan_id, output_path, window_start, window_end, numpy_dir, max_slices=15):
+def visualize_scan(slice_labels, attention_weights, scan_id, output_path, window_start, window_end, numpy_dir, n_display=10):
     """Create visualization with two rows: ground truth overlay and attention overlay on CT slices."""
     # Extract window
     window_labels = slice_labels[window_start:window_end]
@@ -186,14 +186,8 @@ def visualize_scan(slice_labels, attention_weights, scan_id, output_path, window
 
     n_slices = len(window_labels)
 
-    # Sample every Nth slice if we have more than max_slices
-    if n_slices > max_slices:
-        step = n_slices / max_slices
-        sample_indices = [int(i * step) for i in range(max_slices)]
-    else:
-        sample_indices = list(range(n_slices))
-
-    n_display = len(sample_indices)
+    # Use linspace to select n_display evenly spaced slices
+    sample_indices = np.linspace(0, n_slices - 1, n_display, dtype=int)
 
     # Load CT slices
     ct_slices = load_scan_slices(numpy_dir, scan_id, window_start, window_end)
@@ -270,27 +264,33 @@ def visualize_scan(slice_labels, attention_weights, scan_id, output_path, window
 
 
 def visualize_line_plot(slice_labels, attention_weights, scan_id, output_path):
-    """Create line plot showing ground truth labels and normalized attention for all slices."""
+    """Create line plot showing ground truth labels and attention with dual y-axes."""
     n_slices = len(slice_labels)
     slice_numbers = np.arange(1, n_slices + 1)
 
-    # Normalize attention so max is 1
-    attention_norm = attention_weights / (attention_weights.max() + 1e-8)
+    fig, ax1 = plt.subplots(figsize=(12, 4))
 
-    fig, ax = plt.subplots(figsize=(12, 4))
+    # Plot ground truth labels on left y-axis
+    ax1.plot(slice_numbers, slice_labels, 'r-', label='Ground Truth', linewidth=2, marker='o', markersize=3)
+    ax1.set_xlabel('Slice Number', fontsize=12)
+    ax1.set_ylabel('Ground Truth', fontsize=12, color='red')
+    ax1.tick_params(axis='y', labelcolor='red')
+    ax1.set_xlim(1, n_slices)
+    ax1.set_ylim(-0.1, 1.1)
 
-    # Plot ground truth labels
-    ax.plot(slice_numbers, slice_labels, 'r-', label='Ground Truth', linewidth=2, marker='o', markersize=3)
+    # Create second y-axis for attention
+    ax2 = ax1.twinx()
+    ax2.plot(slice_numbers, attention_weights, 'b-', label='Attention', linewidth=2, marker='s', markersize=3)
+    ax2.set_ylabel('Attention', fontsize=12, color='blue')
+    ax2.tick_params(axis='y', labelcolor='blue')
 
-    # Plot normalized attention
-    ax.plot(slice_numbers, attention_norm, 'b-', label='Attention (normalized)', linewidth=2, marker='s', markersize=3)
+    # Combine legends
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper right', fontsize=10)
 
-    ax.set_xlabel('Slice Number', fontsize=12)
-    ax.set_ylabel('Value', fontsize=12)
-    ax.set_title(f'Scan: {scan_id} - Ground Truth vs Attention ({n_slices} slices)', fontsize=14)
-    ax.legend(loc='upper right', fontsize=10)
-    ax.set_xlim(1, n_slices)
-    ax.grid(True, alpha=0.3)
+    ax1.set_title(f'Scan: {scan_id} - Ground Truth vs Attention ({n_slices} slices)', fontsize=14)
+    ax1.grid(True, alpha=0.3)
 
     plt.tight_layout()
     plt.savefig(output_path, dpi=150, bbox_inches='tight')
@@ -310,7 +310,7 @@ def main():
     parser.add_argument('--output', default='attention_viz.png', help='Output image path')
     parser.add_argument('--scan_idx', type=int, default=0, help='Index of positive scan to visualize (among positive test scans)')
     parser.add_argument('--context', type=int, default=3, help='Number of context slices on each side')
-    parser.add_argument('--max_slices', type=int, default=15, help='Maximum number of slices to display in CT visualization')
+    parser.add_argument('--n_display', type=int, default=10, help='Number of slices to display in CT visualization')
     args = parser.parse_args()
 
     # Find and load the best model
@@ -358,7 +358,7 @@ def main():
     window_start, window_end = find_positive_window(slice_labels, context=args.context)
 
     if window_start is not None:
-        visualize_scan(slice_labels, scan_attention, scan_id, args.output, window_start, window_end, args.numpy_dir, args.max_slices)
+        visualize_scan(slice_labels, scan_attention, scan_id, args.output, window_start, window_end, args.numpy_dir, args.n_display)
     else:
         print("No positive slices found in this scan (unexpected for positive scan)")
 
