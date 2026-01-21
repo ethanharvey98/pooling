@@ -357,10 +357,8 @@ def main():
     # Find window around positive slices
     window_start, window_end = find_positive_window(slice_labels, context=args.context)
 
-    if window_start is not None:
-        visualize_scan(slice_labels, scan_attention, scan_id, args.output, window_start, window_end, args.numpy_dir, args.n_display)
-    else:
-        print("No positive slices found in this scan (unexpected for positive scan)")
+    # Visualize all slices with linspace sampling
+    visualize_scan(slice_labels, scan_attention, scan_id, args.output, 0, len(slice_labels), args.numpy_dir, args.n_display)
 
     # Save line plot for all slices
     line_plot_path = args.output.replace('.png', '_lineplot.png')
