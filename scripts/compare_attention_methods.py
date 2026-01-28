@@ -114,21 +114,16 @@ def plot_line_comparison(attentions, labels, scan_id, output_dir):
     ax1.set_ylim(-0.05, 1.05)
     ax1.tick_params(axis='y', labelcolor='#FF6B6B')
 
-    # Attention weights (raw, not normalized)
+    # Attention weights (normalized)
     ax2 = ax1.twinx()
     colors = {'ABMIL': '#4A90E2', 'TransMIL': '#50C878', 'SmAP': '#9B59B6'}
 
-    # Find global min/max for consistent y-axis
-    all_attn = np.concatenate(list(attentions.values()))
-    attn_min, attn_max = all_attn.min(), all_attn.max()
-    attn_range = attn_max - attn_min
-    attn_padding = attn_range * 0.05
-
     for method, attn in attentions.items():
-        ax2.plot(slice_nums, attn, color=colors[method], linewidth=2, alpha=0.7, label=method)
+        attn_norm = (attn - attn.min()) / (attn.max() - attn.min() + 1e-8)
+        ax2.plot(slice_nums, attn_norm, color=colors[method], linewidth=2, alpha=0.7, label=method)
 
-    ax2.set_ylabel('Attention', fontsize=12)
-    ax2.set_ylim(attn_min - attn_padding, attn_max + attn_padding)
+    ax2.set_ylabel('Normalized Attention', fontsize=12)
+    ax2.set_ylim(-0.05, 1.05)
 
     # Legend
     lines1, labels1 = ax1.get_legend_handles_labels()
