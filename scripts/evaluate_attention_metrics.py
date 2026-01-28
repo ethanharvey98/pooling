@@ -98,7 +98,7 @@ def evaluate_seed(experiments_dir, dataset_dir, labels_csv, numpy_dir, pooling, 
     attention = get_attention(model, X, lengths, embedding_level)
     _, slice_labels = get_test_slice_labels(labels_csv, numpy_dir, seed)
 
-    attn_sum, aurocs, auprcs, max_correct = [], [], [], []
+    attn_sum, aurocs, auprcs, max_correct, max_attns = [], [], [], [], []
     start = 0
     for i, length in enumerate(lengths):
         attn = attention[start:start + length]
@@ -113,13 +113,15 @@ def evaluate_seed(experiments_dir, dataset_dir, labels_csv, numpy_dir, pooling, 
             aurocs.append(roc_auc_score(labels, attn))
             auprcs.append(average_precision_score(labels, attn))
         max_correct.append(labels[np.argmax(attn)] == 1)
+        max_attns.append(attn.max())
 
     return {
         'val_auroc': val_auroc,
         'attn_sum': np.mean(attn_sum),
         'auroc': np.mean(aurocs),
         'auprc': np.mean(auprcs),
-        'max_correct': np.mean(max_correct)
+        'max_correct': np.mean(max_correct),
+        'max_attn': np.mean(max_attns)
     }
 
 
@@ -148,15 +150,16 @@ def main():
                 print(f"  AUROC:                {result['auroc']:.4f}")
                 print(f"  AUPRC:                {result['auprc']:.4f}")
                 print(f"  Max attn correct:     {result['max_correct']:.4f}")
+                print(f"  Max attention:        {result['max_attn']:.4f}")
             else:
                 print(f"Seed {seed}: No model found")
 
         if results:
-            results = np.array([[r['attn_sum'], r['auroc'], r['auprc'], r['max_correct']] for r in results])
+            results = np.array([[r['attn_sum'], r['auroc'], r['auprc'], r['max_correct'], r['max_attn']] for r in results])
             print(f"\n{method} Summary ({len(results)} seeds):")
             print(f"{'Metric':<30} {'Mean':>10} {'Std':>10}")
             print("-" * 50)
-            for i, name in enumerate(['Attention sum on positive', 'AUROC', 'AUPRC', 'Max attention correct']):
+            for i, name in enumerate(['Attention sum on positive', 'AUROC', 'AUPRC', 'Max attention correct', 'Max attention']):
                 print(f"{name:<30} {results[:, i].mean():>10.4f} {results[:, i].std():>10.4f}")
         else:
             print(f"\nNo {method} models found")
