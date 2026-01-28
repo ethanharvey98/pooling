@@ -111,8 +111,8 @@ def bootstrap_auroc_difference(y_true, preds1, preds2, n_bootstrap=1000, random_
     return auroc1_samples, auroc2_samples, diff_samples, ci_lower, ci_upper
 
 
-def plot_bootstrap_histogram(diff_samples, ci_lower, ci_upper, method1, method2, output_path):
-    """Plot histogram of bootstrap AUROC differences with confidence intervals."""
+def plot_bootstrap_histogram(diff_samples, ci_lower, ci_upper, epsilon, prob_greater_epsilon, method1, method2, output_path):
+    """Plot histogram of bootstrap AUROC differences with confidence intervals and epsilon threshold."""
     fig, ax = plt.subplots(figsize=(10, 6))
 
     # Histogram
@@ -128,6 +128,10 @@ def plot_bootstrap_histogram(diff_samples, ci_lower, ci_upper, method1, method2,
     # Mean difference
     mean_diff = diff_samples.mean()
     ax.axvline(mean_diff, color='green', linestyle='-', linewidth=2, label=f'Mean: {mean_diff:.4f}')
+
+    # Epsilon threshold line
+    ax.axvline(epsilon, color='purple', linestyle=':', linewidth=2.5,
+               label=f'ε = {epsilon:.3f}\nPr(Δ > ε) = {prob_greater_epsilon:.1%}')
 
     ax.set_xlabel(f'AUROC Difference ({method1} - {method2})', fontsize=12)
     ax.set_ylabel('Frequency', fontsize=12)
@@ -147,6 +151,7 @@ def main():
     parser.add_argument('--method2', default='Mean', help='Second pooling method (default: Mean)', type=str)
     parser.add_argument('--seed', default=1001, help='Random seed for train/test split (default: 1001)', type=int)
     parser.add_argument('--n_bootstrap', default=1000, help='Number of bootstrap samples (default: 1000)', type=int)
+    parser.add_argument('--epsilon', default=0.001, help='Minimum meaningful difference threshold (default: 0.001)', type=float)
     parser.add_argument('--experiments_dir', default='/cluster/tufts/hugheslab/dloevl01/pooling/experiments/RSNA/embedding_level=True',
                         help='Directory containing experiments', type=str)
     parser.add_argument('--dataset_dir', default='/cluster/tufts/hugheslab/dloevl01/encoded_RSNA/ViT_B_16',
@@ -161,6 +166,7 @@ def main():
     print("=" * 80)
     print(f"Seed: {args.seed}")
     print(f"Bootstrap samples: {args.n_bootstrap}")
+    print(f"Epsilon (minimum meaningful difference): {args.epsilon}")
     print()
 
     # Load test data
@@ -206,6 +212,9 @@ def main():
         y, preds1, preds2, n_bootstrap=args.n_bootstrap, random_state=args.seed
     )
 
+    # Compute Pr(Delta > epsilon)
+    prob_greater_epsilon = np.mean(diff_samples > args.epsilon)
+
     print()
     print("=" * 80)
     print("Results")
@@ -215,6 +224,10 @@ def main():
     print(f"Difference: {auroc1 - auroc2:.4f}")
     print(f"Bootstrap mean difference: {diff_samples.mean():.4f}")
     print(f"95% CI: [{ci_lower:.4f}, {ci_upper:.4f}]")
+
+    print()
+    print(f"Pr(Δ > ε={args.epsilon}): {prob_greater_epsilon:.1%}")
+    print(f"We are {prob_greater_epsilon:.1%} confident that {args.method1} improves AUROC by at least {args.epsilon}")
 
     if ci_lower > 0:
         print(f"\n{args.method1} is significantly better than {args.method2} (p < 0.05)")
@@ -228,7 +241,8 @@ def main():
     # Plot histogram
     os.makedirs(args.output_dir, exist_ok=True)
     output_path = f"{args.output_dir}/bootstrap_{args.method1}_vs_{args.method2}_seed{args.seed}.png"
-    plot_bootstrap_histogram(diff_samples, ci_lower, ci_upper, args.method1, args.method2, output_path)
+    plot_bootstrap_histogram(diff_samples, ci_lower, ci_upper, args.epsilon, prob_greater_epsilon,
+                            args.method1, args.method2, output_path)
 
     print()
     print("=" * 80)
