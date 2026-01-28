@@ -13,7 +13,7 @@ import sys
 
 import numpy as np
 import torch
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import roc_auc_score, average_precision_score
 from sklearn.model_selection import train_test_split
 
 sys.path.append('src')
@@ -98,7 +98,7 @@ def evaluate_seed(experiments_dir, dataset_dir, labels_csv, numpy_dir, pooling, 
     attention = get_attention(model, X, lengths, embedding_level)
     _, slice_labels = get_test_slice_labels(labels_csv, numpy_dir, seed)
 
-    attn_sum, aurocs, max_correct = [], [], []
+    attn_sum, aurocs, auprcs, max_correct = [], [], [], []
     start = 0
     for i, length in enumerate(lengths):
         attn = attention[start:start + length]
@@ -111,12 +111,14 @@ def evaluate_seed(experiments_dir, dataset_dir, labels_csv, numpy_dir, pooling, 
         attn_sum.append(attn[labels == 1].sum())
         if len(np.unique(labels)) > 1:
             aurocs.append(roc_auc_score(labels, attn))
+            auprcs.append(average_precision_score(labels, attn))
         max_correct.append(labels[np.argmax(attn)] == 1)
 
     return {
         'val_auroc': val_auroc,
         'attn_sum': np.mean(attn_sum),
         'auroc': np.mean(aurocs),
+        'auprc': np.mean(auprcs),
         'max_correct': np.mean(max_correct)
     }
 
@@ -144,16 +146,17 @@ def main():
                 print(f"  Val AUROC:            {result['val_auroc']:.4f}")
                 print(f"  Attn sum on positive: {result['attn_sum']:.4f}")
                 print(f"  AUROC:                {result['auroc']:.4f}")
+                print(f"  AUPRC:                {result['auprc']:.4f}")
                 print(f"  Max attn correct:     {result['max_correct']:.4f}")
             else:
                 print(f"Seed {seed}: No model found")
 
         if results:
-            results = np.array([[r['attn_sum'], r['auroc'], r['max_correct']] for r in results])
+            results = np.array([[r['attn_sum'], r['auroc'], r['auprc'], r['max_correct']] for r in results])
             print(f"\n{method} Summary ({len(results)} seeds):")
             print(f"{'Metric':<30} {'Mean':>10} {'Std':>10}")
             print("-" * 50)
-            for i, name in enumerate(['Attention sum on positive', 'AUROC', 'Max attention correct']):
+            for i, name in enumerate(['Attention sum on positive', 'AUROC', 'AUPRC', 'Max attention correct']):
                 print(f"{name:<30} {results[:, i].mean():>10.4f} {results[:, i].std():>10.4f}")
         else:
             print(f"\nNo {method} models found")
