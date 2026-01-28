@@ -130,12 +130,11 @@ def plot_line_comparison(attentions, labels, scan_id, output_dir):
     lines2, labels2 = ax2.get_legend_handles_labels()
     ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper right', fontsize=10)
 
-    plt.title(f'Attention Comparison - Scan: {scan_id}', fontsize=14)
     plt.tight_layout()
 
     os.makedirs(output_dir, exist_ok=True)
-    plt.savefig(f'{output_dir}/attention_comparison_line.png', dpi=300, bbox_inches='tight')
-    print(f"Saved: {output_dir}/attention_comparison_line.png")
+    plt.savefig(f'{output_dir}/{scan_id}_line.png', dpi=300, bbox_inches='tight')
+    print(f"Saved: {output_dir}/{scan_id}_line.png")
     plt.close()
 
 
@@ -173,12 +172,100 @@ def plot_grid_visualization(attentions, labels, scan_id, ct_slices, output_dir):
 
         axes[row_idx, 0].set_ylabel(method, fontsize=10, fontweight='bold')
 
-    plt.suptitle(f'Attention Visualization - Scan: {scan_id}', fontsize=14, y=0.995)
     plt.tight_layout()
 
     os.makedirs(output_dir, exist_ok=True)
-    plt.savefig(f'{output_dir}/attention_comparison_grid.png', dpi=300, bbox_inches='tight')
-    print(f"Saved: {output_dir}/attention_comparison_grid.png")
+    plt.savefig(f'{output_dir}/{scan_id}_grid.png', dpi=300, bbox_inches='tight')
+    print(f"Saved: {output_dir}/{scan_id}_grid.png")
+    plt.close()
+
+
+def plot_ground_truth_only(labels, scan_id, ct_slices, output_dir):
+    """Plot only ground truth CT scans."""
+    sample_idx = np.linspace(0, len(labels) - 1, 10, dtype=int)
+
+    fig, axes = plt.subplots(1, 10, figsize=(15, 2))
+
+    for i, si in enumerate(sample_idx):
+        axes[i].imshow(ct_slices[si], cmap='gray')
+        if labels[si] == 1:
+            axes[i].imshow(np.ones((*ct_slices[si].shape, 4)) * [1, 0, 0, 0.3])
+        axes[i].set_xticks([])
+        axes[i].set_yticks([])
+        axes[i].set_xlabel(si + 1, fontsize=8)
+        for spine in axes[i].spines.values():
+            spine.set_edgecolor('red' if labels[si] == 1 else 'black')
+            spine.set_linewidth(2 if labels[si] == 1 else 0.5)
+    axes[0].set_ylabel('Ground Truth', fontsize=10, fontweight='bold')
+
+    plt.tight_layout()
+
+    os.makedirs(output_dir, exist_ok=True)
+    plt.savefig(f'{output_dir}/{scan_id}_ground_truth.png', dpi=300, bbox_inches='tight')
+    print(f"Saved: {output_dir}/{scan_id}_ground_truth.png")
+    plt.close()
+
+
+def plot_combined(attentions, labels, scan_id, ct_slices, output_dir):
+    """Plot combined figure with ground truth scans on top and line plot below."""
+    sample_idx = np.linspace(0, len(labels) - 1, 10, dtype=int)
+    slice_nums = np.arange(1, len(labels) + 1)
+
+    # Create figure with 2 rows: top for CT scans, bottom for line plot
+    fig = plt.figure(figsize=(15, 7))
+    gs = fig.add_gridspec(2, 1, height_ratios=[1, 2], hspace=0.3)
+
+    # Top: Ground truth CT scans
+    gs_top = gs[0].subgridspec(1, 10, wspace=0.05)
+    for i, si in enumerate(sample_idx):
+        ax = fig.add_subplot(gs_top[i])
+        ax.imshow(ct_slices[si], cmap='gray')
+        if labels[si] == 1:
+            ax.imshow(np.ones((*ct_slices[si].shape, 4)) * [1, 0, 0, 0.3])
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_xlabel(si + 1, fontsize=8)
+        for spine in ax.spines.values():
+            spine.set_edgecolor('red' if labels[si] == 1 else 'black')
+            spine.set_linewidth(2 if labels[si] == 1 else 0.5)
+
+    # Add (a) label
+    fig.text(0.02, 0.75, '(a)', fontsize=14, fontweight='bold')
+
+    # Bottom: Line plot
+    ax_line = fig.add_subplot(gs[1])
+
+    # Ground truth
+    ax_line.plot(slice_nums, labels, color='black', linewidth=3.5, alpha=0.8)
+    ax_line.plot(slice_nums, labels, color='#FF6B6B', linewidth=2, alpha=0.8, label='Ground Truth')
+    ax_line.set_xlabel('Slice Number', fontsize=12)
+    ax_line.set_ylabel('Ground Truth', color='#FF6B6B', fontsize=12)
+    ax_line.set_xlim(1, len(labels))
+    ax_line.set_ylim(-0.05, 1.05)
+    ax_line.tick_params(axis='y', labelcolor='#FF6B6B')
+
+    # Attention weights
+    ax2 = ax_line.twinx()
+    colors = {'ABMIL': '#4A90E2', 'TransMIL': '#50C878', 'SmAP': '#9B59B6'}
+
+    for method, attn in attentions.items():
+        attn_norm = (attn - attn.min()) / (attn.max() - attn.min() + 1e-8)
+        ax2.plot(slice_nums, attn_norm, color=colors[method], linewidth=2, alpha=0.7, label=method)
+
+    ax2.set_ylabel('Normalized Attention', fontsize=12)
+    ax2.set_ylim(-0.05, 1.05)
+
+    # Legend
+    lines1, labels1 = ax_line.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax_line.legend(lines1 + lines2, labels1 + labels2, loc='upper right', fontsize=10)
+
+    # Add (b) label
+    fig.text(0.02, 0.45, '(b)', fontsize=14, fontweight='bold')
+
+    os.makedirs(output_dir, exist_ok=True)
+    plt.savefig(f'{output_dir}/{scan_id}_combined.png', dpi=300, bbox_inches='tight')
+    print(f"Saved: {output_dir}/{scan_id}_combined.png")
     plt.close()
 
 
@@ -228,8 +315,14 @@ def main():
     # Create line plot
     plot_line_comparison(attentions, labels, scan_id, OUTPUT_DIR)
 
-    # Create grid visualization
+    # Create grid visualization with all methods
     plot_grid_visualization(attentions, labels, scan_id, ct_slices, OUTPUT_DIR)
+
+    # Create ground truth only visualization
+    plot_ground_truth_only(labels, scan_id, ct_slices, OUTPUT_DIR)
+
+    # Create combined visualization
+    plot_combined(attentions, labels, scan_id, ct_slices, OUTPUT_DIR)
 
     print()
     print("=" * 80)
