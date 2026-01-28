@@ -28,6 +28,7 @@ NUMPY_DIR = '/cluster/tufts/hugheslab/datasets/RSNA_numpy'
 EMBEDDING_LEVEL = True
 SEEDS = [1001, 2001, 3001]
 METHODS = ['ABMIL', 'TransMIL', 'SmAP']
+BASELINES = ['Middle12']  # Baselines that don't require trained models
 
 
 def find_best_model(experiments_dir, pooling, seed):
@@ -85,6 +86,20 @@ def get_test_slice_labels(labels_csv, numpy_dir, seed):
     return test_df['Study ID'].values, test_df['Any'].apply(lambda x: np.array(ast.literal_eval(x))).values
 
 
+def get_middle12_attention(length):
+    """
+    Get attention weights for Middle 12 baseline.
+    Places uniform attention (1/12) on the middle 12 slices, 0 elsewhere.
+    If scan has fewer than 12 slices, uses all slices uniformly.
+    """
+    attn = np.zeros(length)
+    n_middle = min(12, length)
+    start_idx = (length - n_middle) // 2
+    end_idx = start_idx + n_middle
+    attn[start_idx:end_idx] = 1.0 / n_middle
+    return attn
+
+
 def evaluate_seed(experiments_dir, dataset_dir, labels_csv, numpy_dir, pooling, seed, embedding_level):
     """Evaluate a single seed for a pooling method."""
     model_path, val_auroc = find_best_model(experiments_dir, pooling, seed)
@@ -125,12 +140,49 @@ def evaluate_seed(experiments_dir, dataset_dir, labels_csv, numpy_dir, pooling, 
     }
 
 
+def evaluate_baseline_seed(dataset_dir, labels_csv, numpy_dir, baseline, seed):
+    """Evaluate a single seed for a baseline method (no trained model required)."""
+    test_data = torch.load(f'{dataset_dir}/seed={seed}/test.pth', map_location='cpu', weights_only=False)
+    lengths = test_data['lengths']
+    _, slice_labels = get_test_slice_labels(labels_csv, numpy_dir, seed)
+
+    attn_sum, aurocs, auprcs, max_correct, max_attns = [], [], [], [], []
+
+    for i, length in enumerate(lengths):
+        labels = slice_labels[i]
+
+        if labels.sum() == 0:
+            continue
+
+        # Generate baseline attention based on method
+        if baseline == 'Middle12':
+            attn = get_middle12_attention(length)
+        else:
+            raise ValueError(f"Unknown baseline: {baseline}")
+
+        attn_sum.append(attn[labels == 1].sum())
+        if len(np.unique(labels)) > 1:
+            aurocs.append(roc_auc_score(labels, attn))
+            auprcs.append(average_precision_score(labels, attn))
+        max_correct.append(labels[np.argmax(attn)] == 1)
+        max_attns.append(attn.max())
+
+    return {
+        'attn_sum': np.mean(attn_sum),
+        'auroc': np.mean(aurocs),
+        'auprc': np.mean(auprcs),
+        'max_correct': np.mean(max_correct),
+        'max_attn': np.mean(max_attns)
+    }
+
+
 def main():
     print("=" * 80)
     print("Evaluating Attention Metrics on RSNA Dataset")
     print("=" * 80)
     print()
 
+    # Evaluate trained models
     for method in METHODS:
         print(f"\n{'='*80}")
         print(f"Method: {method}")
@@ -163,6 +215,32 @@ def main():
                 print(f"{name:<30} {results[:, i].mean():>10.4f} {results[:, i].std():>10.4f}")
         else:
             print(f"\nNo {method} models found")
+
+    # Evaluate baselines
+    for baseline in BASELINES:
+        print(f"\n{'='*80}")
+        print(f"Baseline: {baseline}")
+        print('='*80)
+
+        results = []
+        for seed in SEEDS:
+            result = evaluate_baseline_seed(
+                DATASET_DIR, LABELS_CSV, NUMPY_DIR, baseline, seed
+            )
+            results.append(result)
+            print(f"Seed {seed}:")
+            print(f"  Attn sum on positive: {result['attn_sum']:.4f}")
+            print(f"  AUROC:                {result['auroc']:.4f}")
+            print(f"  AUPRC:                {result['auprc']:.4f}")
+            print(f"  Max attn correct:     {result['max_correct']:.4f}")
+            print(f"  Max attention:        {result['max_attn']:.4f}")
+
+        results = np.array([[r['attn_sum'], r['auroc'], r['auprc'], r['max_correct'], r['max_attn']] for r in results])
+        print(f"\n{baseline} Summary ({len(results)} seeds):")
+        print(f"{'Metric':<30} {'Mean':>10} {'Std':>10}")
+        print("-" * 50)
+        for i, name in enumerate(['Attention sum on positive', 'AUROC', 'AUPRC', 'Max attention correct', 'Max attention']):
+            print(f"{name:<30} {results[:, i].mean():>10.4f} {results[:, i].std():>10.4f}")
 
     print("\n" + "="*80)
     print("Evaluation complete")
