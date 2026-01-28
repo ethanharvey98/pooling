@@ -106,8 +106,7 @@ def plot_line_comparison(attentions, labels, scan_id, output_dir):
     fig, ax1 = plt.subplots(figsize=(14, 5))
 
     # Ground truth
-    ax1.plot(slice_nums, labels, color='black', linewidth=3.5, alpha=0.8)
-    ax1.plot(slice_nums, labels, color='#FF6B6B', linewidth=2, alpha=0.8, label='Ground Truth')
+    ax1.plot(slice_nums, labels, color='#FF6B6B', linewidth=2.5, label='Ground Truth')
     ax1.set_xlabel('Slice Number', fontsize=12)
     ax1.set_ylabel('Ground Truth', color='#FF6B6B', fontsize=12)
     ax1.set_xlim(1, len(labels))
@@ -236,8 +235,7 @@ def plot_combined(attentions, labels, scan_id, ct_slices, output_dir):
     ax_line = fig.add_subplot(gs[1])
 
     # Ground truth
-    ax_line.plot(slice_nums, labels, color='black', linewidth=3.5, alpha=0.8)
-    ax_line.plot(slice_nums, labels, color='#FF6B6B', linewidth=2, alpha=0.8, label='Ground Truth')
+    ax_line.plot(slice_nums, labels, color='#FF6B6B', linewidth=2.5, label='Ground Truth')
     ax_line.set_xlabel('Slice Number', fontsize=12)
     ax_line.set_ylabel('Ground Truth', color='#FF6B6B', fontsize=12)
     ax_line.set_xlim(1, len(labels))
