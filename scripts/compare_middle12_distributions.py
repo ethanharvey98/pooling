@@ -33,12 +33,15 @@ SEEDS = [1001, 2001, 3001]
 
 
 def get_val_slice_labels(labels_csv, numpy_dir, seed):
-    """Get validation set slice labels."""
+    """Get validation set slice labels, sorted by Study ID for consistent ordering."""
     import pandas as pd
     df = pd.read_csv(labels_csv)
     df['scan_label'] = df['Any'].apply(lambda x: 1 if any(ast.literal_eval(x)) else 0)
     df['path'] = df['Study ID'].apply(lambda x: f'{numpy_dir}/{x}.npz')
     df = df[df['path'].apply(os.path.exists)]
+
+    # Sort by Study ID to ensure consistent ordering with encoded data
+    df = df.sort_values('Study ID').reset_index(drop=True)
 
     # Split: first get test set, then split remainder into train/val
     train_val_ids, _, train_val_labels, _ = train_test_split(
@@ -52,7 +55,8 @@ def get_val_slice_labels(labels_csv, numpy_dir, seed):
         train_val_df['Study ID'], train_val_df['scan_label'],
         test_size=1/5, random_state=seed, stratify=train_val_df['scan_label']
     )
-    val_df = df[df['Study ID'].isin(val_ids)]
+    # Sort val_df by Study ID to match the order used during encoding
+    val_df = df[df['Study ID'].isin(val_ids)].sort_values('Study ID')
     return val_df['Study ID'].values, val_df['Any'].apply(lambda x: np.array(ast.literal_eval(x))).values
 
 
@@ -142,9 +146,15 @@ def plot_attention_distributions(length, sigma_values, output_dir):
 def evaluate_baseline(lengths, slice_labels, attention_fn, **kwargs):
     """Evaluate a baseline attention method."""
     attn_sum, aurocs, auprcs, max_correct = [], [], [], []
+    mismatches = 0
 
     for i, length in enumerate(lengths):
         labels = slice_labels[i]
+
+        # Check for length mismatch between encoded data and labels
+        if len(labels) != length:
+            mismatches += 1
+            continue
 
         if labels.sum() == 0:
             continue
@@ -156,6 +166,9 @@ def evaluate_baseline(lengths, slice_labels, attention_fn, **kwargs):
             aurocs.append(roc_auc_score(labels, attn))
             auprcs.append(average_precision_score(labels, attn))
         max_correct.append(labels[np.argmax(attn)] == 1)
+
+    if mismatches > 0:
+        print(f"  WARNING: {mismatches}/{len(lengths)} scans had length mismatches (skipped)")
 
     return {
         'attn_sum': np.mean(attn_sum),
