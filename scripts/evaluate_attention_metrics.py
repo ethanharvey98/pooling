@@ -35,12 +35,16 @@ GAUSSIAN_SIGMA = 1.0  # Default sigma for Gaussian baseline
 
 def find_best_model(experiments_dir, pooling, seed):
     """Find best model by validation AUROC."""
+    import pandas as pd
     pattern = os.path.join(experiments_dir, f"*pooling={pooling}*seed={seed}*.csv")
     best_val_auroc, best_file = -1, None
 
     for csv_file in glob.glob(pattern):
-        import pandas as pd
-        df = pd.read_csv(csv_file)
+        try:
+            df = pd.read_csv(csv_file)
+        except pd.errors.EmptyDataError:
+            print(f"  Warning: Empty CSV file skipped: {csv_file}")
+            continue
         valid_df = df[df['val_auroc'] <= df['train_auroc']]
         if valid_df.empty:
             continue
