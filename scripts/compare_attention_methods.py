@@ -207,64 +207,68 @@ def plot_ground_truth_only(labels, scan_id, ct_slices, output_dir):
 
 def plot_combined(attentions, labels, scan_id, ct_slices, output_dir):
     """Plot combined figure with ground truth scans on top and line plot below."""
-    sample_idx = np.linspace(0, len(labels) - 1, 10, dtype=int)
-    slice_nums = np.arange(1, len(labels) + 1)
+    import matplotlib.gridspec as gridspec
 
-    # Create figure with 2 rows: top for CT scans, bottom for line plot
-    fig = plt.figure(figsize=(15, 7))
-    gs = fig.add_gridspec(2, 1, height_ratios=[1, 2], hspace=0.3)
+    # Save and restore rcParams to avoid affecting other plots
+    original_font_size = plt.rcParams.get('font.size', 10)
+    plt.rcParams.update({"font.size": 10})
 
-    # Top: Ground truth CT scans
-    gs_top = gs[0].subgridspec(1, 10, wspace=0.05)
-    for i, si in enumerate(sample_idx):
-        ax = fig.add_subplot(gs_top[i])
-        ax.imshow(ct_slices[si], cmap='gray')
-        if labels[si] == 1:
-            ax.imshow(np.ones((*ct_slices[si].shape, 4)) * [1, 0, 0, 0.3])
-        ax.set_xticks([])
-        ax.set_yticks([])
-        ax.set_xlabel(si + 1, fontsize=8)
-        for spine in ax.spines.values():
-            spine.set_edgecolor('red' if labels[si] == 1 else 'black')
-            spine.set_linewidth(2 if labels[si] == 1 else 0.5)
+    n_slices = len(labels)
+    ncols, nrows = 10, 2
 
-    # Add (a) label
-    fig.text(0.02, 0.75, '(a)', fontsize=14, fontweight='bold')
+    fig = plt.figure(figsize=(1 * ncols, 3 * nrows))
+    gs = gridspec.GridSpec(ncols=ncols, nrows=nrows)
+    axs_top = [fig.add_subplot(gs[0, i]) for i in range(ncols)]
+    ax_bottom = fig.add_subplot(gs[1, :])
 
-    # Bottom: Line plot
-    ax_line = fig.add_subplot(gs[1])
+    # Select 10 evenly spaced slices (1-indexed like the mockup)
+    indices = np.round(np.linspace(start=1, stop=n_slices, num=ncols)).astype(int)
 
-    # Ground truth
-    ax_line.plot(slice_nums, labels, color='#FF6B6B', linewidth=2.5, label='Ground Truth')
-    ax_line.set_xlabel('Slice Number', fontsize=12)
-    ax_line.set_ylabel('Ground Truth', color='#FF6B6B', fontsize=12)
-    ax_line.set_xlim(1, len(labels))
-    ax_line.set_ylim(-0.05, 1.05)
-    ax_line.tick_params(axis='y', labelcolor='#FF6B6B')
+    # Top row: CT slices with blue borders on positive slices
+    for i, j in enumerate(indices):
+        axs_top[i].imshow(ct_slices[j - 1], cmap='gray')
+        axs_top[i].set_xlabel(rf"${j}$")
+        axs_top[i].set_xticks([])
+        axs_top[i].set_yticks([])
 
-    # Attention weights
-    ax2 = ax_line.twinx()
-    colors = {'ABMIL': '#4A90E2', 'TransMIL': '#50C878', 'SmAP': '#9B59B6'}
+        for spine in axs_top[i].spines.values():
+            if labels[j - 1] == 1:
+                spine.set_visible(True)
+                spine.set_color("#1F77B4")
+                spine.set_linewidth(2)
+            else:
+                spine.set_visible(False)
 
+    # Bottom plot: attention weights comparison
+    slice_nums = np.arange(1, n_slices + 1)
+
+    # Ground truth normalized to sum to 1
+    gt_normalized = labels / (np.sum(labels) + 1e-8)
+    ax_bottom.plot(slice_nums, gt_normalized, color="#1F77B4", label="Ground truth", linewidth=3)
+    ax_bottom.fill_between(slice_nums, gt_normalized, alpha=0.3, color="#1F77B4")
+
+    # Attention weights (already normalized via softmax in the model)
+    colors = {'ABMIL': '#D62728', 'TransMIL': '#9467BD', 'SmAP': '#8C564B'}
     for method, attn in attentions.items():
-        attn_norm = (attn - attn.min()) / (attn.max() - attn.min() + 1e-8)
-        ax2.plot(slice_nums, attn_norm, color=colors[method], linewidth=2, alpha=0.7, label=method)
+        ax_bottom.plot(slice_nums, attn, color=colors[method], label=method, linewidth=3)
 
-    ax2.set_ylabel('Normalized Attention', fontsize=12)
-    ax2.set_ylim(-0.05, 1.05)
+    ax_bottom.set_xlabel(r"Slice index $j$")
+    ax_bottom.set_ylabel(r"Attention $a_{ij}$")
+    ax_bottom.set_xlim(1, n_slices)
+    ax_bottom.legend(loc="upper right")
+    ax_bottom.grid()
 
-    # Legend
-    lines1, labels1 = ax_line.get_legend_handles_labels()
-    lines2, labels2 = ax2.get_legend_handles_labels()
-    ax_line.legend(lines1 + lines2, labels1 + labels2, loc='upper right', fontsize=10)
-
-    # Add (b) label
-    fig.text(0.02, 0.45, '(b)', fontsize=14, fontweight='bold')
+    fig.tight_layout()
 
     os.makedirs(output_dir, exist_ok=True)
     plt.savefig(f'{output_dir}/{scan_id}_combined.png', dpi=300, bbox_inches='tight')
+    plt.savefig(f'{output_dir}/{scan_id}_combined.pdf', bbox_inches='tight')
     print(f"Saved: {output_dir}/{scan_id}_combined.png")
+    print(f"Saved: {output_dir}/{scan_id}_combined.pdf")
     plt.close()
+
+    # Restore original font size
+    plt.rcParams.update({"font.size": original_font_size})
 
 
 def main():
