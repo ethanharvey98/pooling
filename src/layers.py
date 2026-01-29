@@ -27,20 +27,51 @@ class Mean(torch.nn.Module):
         super().__init__()
 
     def forward(
-        self, 
-        x: torch.Tensor, 
+        self,
+        x: torch.Tensor,
         lengths: Tuple[int, ...],
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         out = torch.cat([
-            torch.mean(x_i, dim=0, keepdim=True) 
+            torch.mean(x_i, dim=0, keepdim=True)
             for x_i in torch.split(x, lengths)
         ])
         attn_weights = torch.cat([
-            torch.ones(size=(length, 1), device=x.device) / length 
+            torch.ones(size=(length, 1), device=x.device) / length
             for length in lengths
         ])
         return out, attn_weights
-    
+
+class CenterGaussian(torch.nn.Module):
+    def __init__(self, sigma: float = 5.0, learnable_sigma: bool = True):
+        super().__init__()
+        # Store raw (unconstrained) sigma; softplus ensures sigma > 0
+        raw_sigma = torch.log(torch.exp(torch.tensor(sigma)) - 1)  # inverse softplus
+        if learnable_sigma:
+            self.raw_sigma = torch.nn.Parameter(raw_sigma)
+        else:
+            self.register_buffer("raw_sigma", raw_sigma)
+
+    @property
+    def sigma(self) -> torch.Tensor:
+        return torch.nn.functional.softplus(self.raw_sigma)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        lengths: Tuple[int, ...],
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        def gaussian_weights(length):
+            center = (length - 1) / 2.0
+            indices = torch.arange(length, device=x.device, dtype=x.dtype)
+            weights = torch.exp(-0.5 * ((indices - center) / self.sigma) ** 2)
+            return (weights / weights.sum()).unsqueeze(1)
+        attn_weights = torch.cat([gaussian_weights(length) for length in lengths])
+        out = torch.cat([
+            (weights_i * x_i).sum(dim=0, keepdim=True)
+            for weights_i, x_i in zip(torch.split(attn_weights, lengths), torch.split(x, lengths))
+        ])
+        return out, attn_weights
+
 class ABMIL(torch.nn.Module):
     def __init__(
         self,

@@ -9,11 +9,13 @@ class ClfPool(torch.nn.Module):
 
         self.clf = torch.nn.Linear(in_features=in_features, out_features=out_features, bias=True)
 
-        assert pooling in ['Max', 'Mean', 'ABMIL', 'SmAP']
+        assert pooling in ['Max', 'Mean', 'CenterGaussian', 'ABMIL', 'SmAP']
         if pooling == 'Max':
             self.pool = layers.Max()
         elif pooling == 'Mean':
             self.pool = layers.Mean()
+        elif pooling == 'CenterGaussian':
+            self.pool = layers.CenterGaussian()
         elif pooling == 'ABMIL':
             self.pool = layers.ABMIL(in_features=out_features)
         elif pooling == 'SmAP':
@@ -28,11 +30,13 @@ class PoolClf(torch.nn.Module):
     def __init__(self, in_features, out_features, pooling='Max', num_heads=8, neighbors=1):
         super().__init__()
 
-        assert pooling in ['Max', 'Mean', 'ABMIL', 'TransMIL', 'SmAP']
+        assert pooling in ['Max', 'Mean', 'CenterGaussian', 'ABMIL', 'TransMIL', 'SmAP']
         if pooling == 'Max':
             self.pool = layers.Max()
         elif pooling == 'Mean':
             self.pool = layers.Mean()
+        elif pooling == 'CenterGaussian':
+            self.pool = layers.CenterGaussian()
         elif pooling == 'ABMIL':
             self.pool = layers.ABMIL(in_features=in_features)
         elif pooling == 'TransMIL':
