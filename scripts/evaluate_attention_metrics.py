@@ -13,6 +13,7 @@ import sys
 
 import numpy as np
 import torch
+from scipy.stats import norm
 from sklearn.metrics import roc_auc_score, average_precision_score
 from sklearn.model_selection import train_test_split
 
@@ -28,7 +29,8 @@ NUMPY_DIR = '/cluster/tufts/hugheslab/datasets/RSNA_numpy'
 EMBEDDING_LEVEL = True
 SEEDS = [1001, 2001, 3001]
 METHODS = ['ABMIL', 'TransMIL', 'SmAP']
-BASELINES = ['Middle12']  # Baselines that don't require trained models
+BASELINES = ['Middle12', 'Gaussian']  # Baselines that don't require trained models
+GAUSSIAN_SIGMA = 1.0  # Default sigma for Gaussian baseline
 
 
 def find_best_model(experiments_dir, pooling, seed):
@@ -100,6 +102,17 @@ def get_middle12_attention(length):
     return attn
 
 
+def get_gaussian_attention(length, sigma=1.0):
+    """
+    Get Gaussian-distributed attention weights centered on middle.
+    Normalized to sum to 1.
+    """
+    center = (length - 1) / 2.0
+    indices = np.arange(length)
+    attn = norm.pdf(indices, loc=center, scale=sigma)
+    return attn / attn.sum()
+
+
 def evaluate_seed(experiments_dir, dataset_dir, labels_csv, numpy_dir, pooling, seed, embedding_level):
     """Evaluate a single seed for a pooling method."""
     model_path, val_auroc = find_best_model(experiments_dir, pooling, seed)
@@ -157,6 +170,8 @@ def evaluate_baseline_seed(dataset_dir, labels_csv, numpy_dir, baseline, seed):
         # Generate baseline attention based on method
         if baseline == 'Middle12':
             attn = get_middle12_attention(length)
+        elif baseline == 'Gaussian':
+            attn = get_gaussian_attention(length, sigma=GAUSSIAN_SIGMA)
         else:
             raise ValueError(f"Unknown baseline: {baseline}")
 
