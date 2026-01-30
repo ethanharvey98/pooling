@@ -63,7 +63,7 @@ if __name__=='__main__':
 
     optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.weight_decay, momentum=0.9)
 
-    columns = ['epoch', 'test_auroc', 'test_auprc', 'test_bal_acc', 'test_loss', 'test_nll', 'train_auroc', 'train_auprc', 'train_bal_acc', 'train_loss', 'train_nll', 'train_sec_per_epoch', 'val_auroc', 'val_auprc', 'val_bal_acc', 'val_loss', 'val_nll']
+    columns = ['epoch', 'test_auroc', 'test_auprc', 'test_bal_acc', 'test_loss', 'test_nll', 'train_auroc', 'train_auprc', 'train_bal_acc', 'train_loss', 'train_nll', 'train_sec_per_epoch', 'gpu_mem_allocated_mb', 'gpu_mem_reserved_mb', 'val_auroc', 'val_auprc', 'val_bal_acc', 'val_loss', 'val_nll']
     model_history_df = pd.DataFrame(columns=columns)
 
     for epoch in range(args.epochs):
@@ -81,7 +81,15 @@ if __name__=='__main__':
         val_metrics = utils.evaluate(model, criterion, val_loader)
         test_metrics = utils.evaluate(model, criterion, test_loader)
 
-        row = [epoch, test_metrics['auroc'], test_metrics['auprc'], test_metrics['bal_acc'], test_metrics['loss'], test_metrics['nll'], train_metrics['auroc'], train_metrics['auprc'], train_metrics['bal_acc'], train_metrics['loss'], train_metrics['nll'], train_epoch_end_time - train_epoch_start_time, val_metrics['auroc'], val_metrics['auprc'], val_metrics['bal_acc'], val_metrics['loss'], val_metrics['nll']]
+        # Capture GPU memory usage
+        if device.type == "cuda":
+            gpu_mem_allocated = torch.cuda.memory_allocated(device) / (1024 ** 2)  # MB
+            gpu_mem_reserved = torch.cuda.memory_reserved(device) / (1024 ** 2)  # MB
+        else:
+            gpu_mem_allocated = 0
+            gpu_mem_reserved = 0
+
+        row = [epoch, test_metrics['auroc'], test_metrics['auprc'], test_metrics['bal_acc'], test_metrics['loss'], test_metrics['nll'], train_metrics['auroc'], train_metrics['auprc'], train_metrics['bal_acc'], train_metrics['loss'], train_metrics['nll'], train_epoch_end_time - train_epoch_start_time, gpu_mem_allocated, gpu_mem_reserved, val_metrics['auroc'], val_metrics['auprc'], val_metrics['bal_acc'], val_metrics['loss'], val_metrics['nll']]
         model_history_df.loc[epoch] = row
         print(model_history_df.iloc[epoch])
 
