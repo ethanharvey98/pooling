@@ -103,11 +103,12 @@ def main():
             print(f"{method}: No results found")
             print()
 
-    # Create plot
+    # Create plot (exclude Max)
     if method_stats:
         fig, ax = plt.subplots(figsize=(10, 6))
 
-        methods = list(method_stats.keys())
+        # Filter out Max
+        methods = [m for m in method_stats.keys() if m != 'Max']
         params = [method_stats[m]['params'] for m in methods]
         times = [method_stats[m]['mean'] for m in methods]
         stds = [method_stats[m]['std'] for m in methods]
@@ -119,13 +120,18 @@ def main():
         times = [times[i] for i in sorted_indices]
         stds = [stds[i] for i in sorted_indices]
 
-        # Plot
-        ax.errorbar(params, times, yerr=stds, fmt='o', capsize=5, capthick=2, markersize=8)
+        # Define colors for each method
+        colors = {'Mean': '#3498DB', 'ABMIL': '#2ECC71',
+                  'TransMIL': '#F39C12', 'SmAP': '#9B59B6'}
 
-        # Add method labels
+        # Plot each method with different color
         for i, method in enumerate(methods):
-            ax.annotate(method, (params[i], times[i]),
-                       textcoords="offset points", xytext=(0,10), ha='center')
+            color = colors.get(method, '#95A5A6')
+            ax.errorbar(params[i], times[i], yerr=stds[i],
+                       fmt='o', capsize=5, capthick=2, markersize=5,
+                       color=color, ecolor=color, label=method)
+
+        ax.legend(fontsize=10, loc='best')
 
         ax.set_xlabel('Number of Parameters', fontsize=12)
         ax.set_ylabel('Training Time per Hyperparameter Search (hours)', fontsize=12)
