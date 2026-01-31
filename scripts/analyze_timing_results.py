@@ -120,18 +120,21 @@ def main():
         times = [times[i] for i in sorted_indices]
         stds = [stds[i] for i in sorted_indices]
 
-        # Define colors for each method (matching compare_attention_methods.py)
-        colors = {'Mean': '#2ECC71', 'ABMIL': '#4A90E2',
-                  'TransMIL': '#50C878', 'SmAP': '#9B59B6'}
+        # Define colors: Mean green, ABMIL red, TransMIL purple, SmAP brown
+        colors = {'Mean': '#2ECC71', 'ABMIL': '#D62728',
+                  'TransMIL': '#9467BD', 'SmAP': '#8C564B'}
 
         # Plot each method with different color
         for i, method in enumerate(methods):
             color = colors.get(method, '#95A5A6')
             ax.errorbar(params[i], times[i], yerr=stds[i],
-                       fmt='o', capsize=5, capthick=2, markersize=5,
-                       color=color, ecolor=color, label=method)
+                       fmt='o', capsize=5, capthick=2, markersize=8,
+                       color=color, ecolor=color)
 
-        ax.legend(fontsize=10, loc='best')
+        # Add method labels next to dots
+        for i, method in enumerate(methods):
+            ax.annotate(method, (params[i], times[i]),
+                       textcoords="offset points", xytext=(0,10), ha='center')
 
         ax.set_xlabel('Number of Parameters', fontsize=12)
         ax.set_ylabel('Training Time per Hyperparameter Search (hours)', fontsize=12)
