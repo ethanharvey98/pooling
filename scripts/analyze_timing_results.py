@@ -120,9 +120,9 @@ def main():
         times = [times[i] for i in sorted_indices]
         stds = [stds[i] for i in sorted_indices]
 
-        # Define colors for each method
-        colors = {'Mean': '#3498DB', 'ABMIL': '#2ECC71',
-                  'TransMIL': '#F39C12', 'SmAP': '#9B59B6'}
+        # Define colors for each method (matching compare_attention_methods.py)
+        colors = {'Mean': '#2ECC71', 'ABMIL': '#4A90E2',
+                  'TransMIL': '#50C878', 'SmAP': '#9B59B6'}
 
         # Plot each method with different color
         for i, method in enumerate(methods):
