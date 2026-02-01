@@ -81,16 +81,35 @@ def get_predictions(model, X, lengths):
     return probs
 
 
-def ensemble_predict(models, X, lengths):
-    """Average predictions from multiple models."""
+def ensemble_predict(models, X, lengths, method='soft'):
+    """
+    Ensemble predictions from multiple models.
+
+    Args:
+        models: List of models
+        X: Input features
+        lengths: Sequence lengths
+        method: 'soft' (average probabilities) or 'hard' (majority vote)
+    """
     all_preds = []
     for model in models:
         preds = get_predictions(model, X, lengths)
         all_preds.append(preds)
-    return np.mean(all_preds, axis=0)
+
+    all_preds = np.array(all_preds)
+
+    if method == 'soft':
+        # Average probabilities
+        return np.mean(all_preds, axis=0)
+    elif method == 'hard':
+        # Majority vote: threshold at 0.5, then average votes
+        hard_preds = (all_preds > 0.5).astype(float)
+        return np.mean(hard_preds, axis=0)
+    else:
+        raise ValueError(f"Unknown ensemble method: {method}")
 
 
-def evaluate_ensemble(experiments_dir, dataset_dir, pooling_methods, seed, top_k=1, name="Ensemble"):
+def evaluate_ensemble(experiments_dir, dataset_dir, pooling_methods, seed, top_k=1, method='soft', name="Ensemble"):
     """Evaluate an ensemble of models."""
     # Load test data
     test_data = torch.load(f'{dataset_dir}/seed={seed}/test.pth', map_location='cpu', weights_only=False)
@@ -111,7 +130,7 @@ def evaluate_ensemble(experiments_dir, dataset_dir, pooling_methods, seed, top_k
         return None
 
     # Get ensemble predictions
-    ensemble_preds = ensemble_predict(all_models, X, lengths)
+    ensemble_preds = ensemble_predict(all_models, X, lengths, method=method)
     test_auroc = roc_auc_score(y, ensemble_preds)
 
     return test_auroc
@@ -143,29 +162,31 @@ def main():
     }
 
     for ensemble_name, config in ensembles.items():
-        print(f"\n{'='*80}")
-        print(f"Ensemble: {ensemble_name}")
-        print('='*80)
+        for method in ['soft', 'hard']:
+            print(f"\n{'='*80}")
+            print(f"Ensemble: {ensemble_name} ({method} voting)")
+            print('='*80)
 
-        results = []
-        for seed in SEEDS:
-            print(f"\nSeed {seed}:")
-            test_auroc = evaluate_ensemble(
-                EXPERIMENTS_DIR, DATASET_DIR,
-                config['pooling_methods'], seed,
-                top_k=config['top_k'],
-                name=ensemble_name
-            )
+            results = []
+            for seed in SEEDS:
+                print(f"\nSeed {seed}:")
+                test_auroc = evaluate_ensemble(
+                    EXPERIMENTS_DIR, DATASET_DIR,
+                    config['pooling_methods'], seed,
+                    top_k=config['top_k'],
+                    method=method,
+                    name=ensemble_name
+                )
 
-            if test_auroc is not None:
-                results.append(test_auroc)
-                print(f"  Test AUROC: {test_auroc:.4f}")
-            else:
-                print(f"  No models found")
+                if test_auroc is not None:
+                    results.append(test_auroc)
+                    print(f"  Test AUROC: {test_auroc:.4f}")
+                else:
+                    print(f"  No models found")
 
-        if results:
-            print(f"\n{ensemble_name} Summary ({len(results)} seeds):")
-            print(f"  Mean: {np.mean(results):.4f} ± {np.std(results):.4f}")
+            if results:
+                print(f"\n{ensemble_name} ({method}) Summary ({len(results)} seeds):")
+                print(f"  Mean: {np.mean(results):.4f} ± {np.std(results):.4f}")
 
     print("\n" + "="*80)
     print("Evaluation complete")
