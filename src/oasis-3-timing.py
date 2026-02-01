@@ -70,17 +70,16 @@ if __name__=='__main__':
 
         if device.type == "cuda":
             torch.cuda.synchronize()
-        epoch_start_time = time.time()
-
+        train_epoch_start_time = time.time()
         shuffled_train_metrics = utils.train_one_epoch(model, criterion, optimizer, shuffled_train_loader)
+        if device.type == "cuda":
+            torch.cuda.synchronize()
+        train_epoch_end_time = time.time()
+
         #train_metrics = utils.evaluate(model, criterion, train_loader)
         train_metrics = shuffled_train_metrics
         val_metrics = utils.evaluate(model, criterion, val_loader)
         test_metrics = utils.evaluate(model, criterion, test_loader)
-
-        if device.type == "cuda":
-            torch.cuda.synchronize()
-        epoch_end_time = time.time()
 
         # Capture GPU memory usage
         if device.type == "cuda":
@@ -90,7 +89,7 @@ if __name__=='__main__':
             gpu_mem_allocated = 0
             gpu_mem_reserved = 0
 
-        row = [epoch, test_metrics['auroc'], test_metrics['auprc'], test_metrics['bal_acc'], test_metrics['loss'], test_metrics['nll'], train_metrics['auroc'], train_metrics['auprc'], train_metrics['bal_acc'], train_metrics['loss'], train_metrics['nll'], epoch_end_time - epoch_start_time, gpu_mem_allocated, gpu_mem_reserved, val_metrics['auroc'], val_metrics['auprc'], val_metrics['bal_acc'], val_metrics['loss'], val_metrics['nll']]
+        row = [epoch, test_metrics['auroc'], test_metrics['auprc'], test_metrics['bal_acc'], test_metrics['loss'], test_metrics['nll'], train_metrics['auroc'], train_metrics['auprc'], train_metrics['bal_acc'], train_metrics['loss'], train_metrics['nll'], train_epoch_end_time - train_epoch_start_time, gpu_mem_allocated, gpu_mem_reserved, val_metrics['auroc'], val_metrics['auprc'], val_metrics['bal_acc'], val_metrics['loss'], val_metrics['nll']]
         model_history_df.loc[epoch] = row
         print(model_history_df.iloc[epoch])
 
