@@ -7,63 +7,16 @@ Usage:
 """
 
 import argparse
-import glob
 import os
-import sys
 
 import matplotlib.pyplot as plt
 import numpy as np
-import torch
 from sklearn.metrics import roc_auc_score
 
-sys.path.append('src')
-import models
-
-
-def find_best_model(experiments_dir, pooling, seed):
-    """Find best model by validation AUROC."""
-    pattern = os.path.join(experiments_dir, f"*pooling={pooling}*seed={seed}*.csv")
-    best_val_auroc, best_file = -1, None
-
-    for csv_file in glob.glob(pattern):
-        import pandas as pd
-        df = pd.read_csv(csv_file)
-        valid_df = df[df['val_auroc'] <= df['train_auroc']]
-        if valid_df.empty:
-            continue
-        idx = valid_df['val_auroc'].idxmax()
-        if df.loc[idx, 'val_auroc'] > best_val_auroc:
-            best_val_auroc = df.loc[idx, 'val_auroc']
-            best_file = csv_file.replace('.csv', '.pt')
-
-    return best_file, best_val_auroc
-
-
-def load_model(model_path, in_features, pooling, embedding_level):
-    """Load model from checkpoint."""
-    if embedding_level:
-        model = models.PoolClf(in_features, 1, pooling)
-    else:
-        model = models.ClfPool(in_features, 1, pooling)
-    model.load_state_dict(torch.load(model_path, map_location='cpu', weights_only=True))
-    model.eval()
-    return model
-
-
-def get_predictions(model, X, lengths):
-    """Get scan-level predictions."""
-    with torch.no_grad():
-        logits, _ = model(X, lengths)
-        probs = torch.sigmoid(logits).squeeze().numpy()
-    return probs
-
-
-def get_mean_predictions(X, lengths):
-    """Get mean pooling predictions (uniform average)."""
-    # For mean pooling, we need a simple classifier on top of mean-pooled features
-    # Since we don't have a trained mean pooling model, we'll compute mean pooling
-    # and use it as a baseline. But actually, we should load the Mean model too.
-    raise NotImplementedError("Mean pooling predictions need a trained model")
+from rsna_utils import (
+    EXPERIMENTS_DIR, DATASET_DIR,
+    find_best_model, load_model, get_predictions, load_test_data
+)
 
 
 def bootstrap_auroc_difference(y_true, preds1, preds2, n_bootstrap=1000, random_state=42):
@@ -152,9 +105,9 @@ def main():
     parser.add_argument('--seed', default=1001, help='Random seed for train/test split (default: 1001)', type=int)
     parser.add_argument('--n_bootstrap', default=1000, help='Number of bootstrap samples (default: 1000)', type=int)
     parser.add_argument('--epsilon', default=0.001, help='Minimum meaningful difference threshold (default: 0.001)', type=float)
-    parser.add_argument('--experiments_dir', default='/cluster/tufts/hugheslab/dloevl01/pooling/experiments/RSNA/embedding_level=True',
+    parser.add_argument('--experiments_dir', default=EXPERIMENTS_DIR,
                         help='Directory containing experiments', type=str)
-    parser.add_argument('--dataset_dir', default='/cluster/tufts/hugheslab/dloevl01/encoded_RSNA/ViT_B_16',
+    parser.add_argument('--dataset_dir', default=DATASET_DIR,
                         help='Directory containing datasets', type=str)
     parser.add_argument('--embedding_level', action='store_true', default=True,
                         help='Use embedding-level approach (default: True)')
@@ -170,9 +123,7 @@ def main():
     print()
 
     # Load test data
-    test_data = torch.load(f'{args.dataset_dir}/seed={args.seed}/test.pth',
-                          map_location='cpu', weights_only=False)
-    X, lengths, y = test_data['X'], test_data['lengths'], test_data['y']
+    X, lengths, y = load_test_data(args.dataset_dir, args.seed)
     y = y.numpy().flatten()
 
     print(f"Test set: {len(y)} scans")

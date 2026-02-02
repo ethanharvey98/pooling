@@ -6,90 +6,21 @@ Usage:
     python scripts/evaluate_attention_metrics.py
 """
 
-import ast
-import glob
-import os
-import sys
-
 import numpy as np
 import torch
 from scipy.stats import norm
 from sklearn.metrics import roc_auc_score, average_precision_score
-from sklearn.model_selection import train_test_split
 
-sys.path.append('src')
-import models
+from rsna_utils import (
+    EXPERIMENTS_DIR, DATASET_DIR, LABELS_CSV, NUMPY_DIR, EMBEDDING_LEVEL, SEEDS,
+    find_best_model, load_model, get_attention, get_test_slice_labels, load_test_data
+)
 
 
-# Configuration
-EXPERIMENTS_DIR = '/cluster/tufts/hugheslab/dloevl01/pooling/experiments/RSNA/embedding_level=True'
-DATASET_DIR = '/cluster/tufts/hugheslab/dloevl01/encoded_RSNA/ViT_B_16'
-LABELS_CSV = '/cluster/tufts/hugheslab/datasets/RSNA/labels.csv'
-NUMPY_DIR = '/cluster/tufts/hugheslab/datasets/RSNA_numpy'
-EMBEDDING_LEVEL = True
-SEEDS = [1001, 2001, 3001]
+# Script-specific configuration
 METHODS = ['ABMIL', 'TransMIL', 'SmAP']
 BASELINES = ['Middle12', 'Gaussian']  # Baselines that don't require trained models
 GAUSSIAN_SIGMA = 1.0  # Default sigma for Gaussian baseline
-
-
-def find_best_model(experiments_dir, pooling, seed):
-    """Find best model by validation AUROC."""
-    import pandas as pd
-    pattern = os.path.join(experiments_dir, f"*pooling={pooling}*seed={seed}*.csv")
-    best_val_auroc, best_file = -1, None
-
-    for csv_file in glob.glob(pattern):
-        try:
-            df = pd.read_csv(csv_file)
-        except pd.errors.EmptyDataError:
-            print(f"  Warning: Empty CSV file skipped: {csv_file}")
-            continue
-        valid_df = df[df['val_auroc'] <= df['train_auroc']]
-        if valid_df.empty:
-            continue
-        idx = valid_df['val_auroc'].idxmax()
-        if df.loc[idx, 'val_auroc'] > best_val_auroc:
-            best_val_auroc = df.loc[idx, 'val_auroc']
-            best_file = csv_file.replace('.csv', '.pt')
-
-    return best_file, best_val_auroc
-
-
-def load_model(model_path, in_features, pooling, embedding_level):
-    """Load model from checkpoint."""
-    if embedding_level:
-        model = models.PoolClf(in_features, 1, pooling)
-    else:
-        model = models.ClfPool(in_features, 1, pooling)
-    model.load_state_dict(torch.load(model_path, map_location='cpu', weights_only=True))
-    model.eval()
-    return model
-
-
-def get_attention(model, X, lengths, embedding_level):
-    """Get attention weights from model."""
-    with torch.no_grad():
-        _, attn = model(X, lengths)
-        if embedding_level:
-            return attn.squeeze().numpy()
-        return torch.sigmoid(model.clf(X)).squeeze().numpy()
-
-
-def get_test_slice_labels(labels_csv, numpy_dir, seed):
-    """Get test set slice labels."""
-    import pandas as pd
-    df = pd.read_csv(labels_csv)
-    df['scan_label'] = df['Any'].apply(lambda x: 1 if any(ast.literal_eval(x)) else 0)
-    df['path'] = df['Study ID'].apply(lambda x: f'{numpy_dir}/{x}.npz')
-    df = df[df['path'].apply(os.path.exists)]
-
-    _, test_ids, _, _ = train_test_split(
-        df['Study ID'], df['scan_label'],
-        test_size=1/6, random_state=seed, stratify=df['scan_label']
-    )
-    test_df = df[df['Study ID'].isin(test_ids)]
-    return test_df['Study ID'].values, test_df['Any'].apply(lambda x: np.array(ast.literal_eval(x))).values
 
 
 def get_middle12_attention(length):
@@ -123,8 +54,7 @@ def evaluate_seed(experiments_dir, dataset_dir, labels_csv, numpy_dir, pooling, 
     if not model_path:
         return None
 
-    test_data = torch.load(f'{dataset_dir}/seed={seed}/test.pth', map_location='cpu', weights_only=False)
-    X, lengths, y = test_data['X'], test_data['lengths'], test_data['y']
+    X, lengths, y = load_test_data(dataset_dir, seed)
 
     model = load_model(model_path, X.shape[1], pooling, embedding_level)
     attention = get_attention(model, X, lengths, embedding_level)
@@ -159,8 +89,7 @@ def evaluate_seed(experiments_dir, dataset_dir, labels_csv, numpy_dir, pooling, 
 
 def evaluate_baseline_seed(dataset_dir, labels_csv, numpy_dir, baseline, seed):
     """Evaluate a single seed for a baseline method (no trained model required)."""
-    test_data = torch.load(f'{dataset_dir}/seed={seed}/test.pth', map_location='cpu', weights_only=False)
-    lengths = test_data['lengths']
+    X, lengths, y = load_test_data(dataset_dir, seed)
     _, slice_labels = get_test_slice_labels(labels_csv, numpy_dir, seed)
 
     attn_sum, aurocs, auprcs, max_correct, max_attns = [], [], [], [], []

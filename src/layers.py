@@ -342,7 +342,7 @@ class ExactSm(Sm):
         self, 
         f: torch.Tensor, 
     ) -> torch.Tensor:
-        A = self._adajency_matrix(len(f), device=f.device, dtype=f.dtype)
+        A = self._adjacency_matrix(len(f), device=f.device, dtype=f.dtype)
         M = torch.eye(len(f), device=f.device, dtype=f.dtype) - self.alpha * A
         rhs = (1.0 - self.alpha) * f
         g = torch.linalg.solve(M, rhs)

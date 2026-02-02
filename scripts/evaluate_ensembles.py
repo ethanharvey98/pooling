@@ -14,22 +14,15 @@ Usage:
 
 import glob
 import os
-import sys
 
 import numpy as np
 import pandas as pd
-import torch
 from sklearn.metrics import roc_auc_score
 
-sys.path.append('src')
-import models
-
-
-# Configuration
-EXPERIMENTS_DIR = '/cluster/tufts/hugheslab/dloevl01/pooling/experiments/RSNA/embedding_level=True'
-DATASET_DIR = '/cluster/tufts/hugheslab/dloevl01/encoded_RSNA/ViT_B_16'
-EMBEDDING_LEVEL = True
-SEEDS = [1001, 2001, 3001]
+from rsna_utils import (
+    EXPERIMENTS_DIR, DATASET_DIR, EMBEDDING_LEVEL, SEEDS,
+    load_model, get_predictions, load_test_data
+)
 
 
 def find_best_models(experiments_dir, pooling, seed, top_k=1):
@@ -54,31 +47,12 @@ def find_best_models(experiments_dir, pooling, seed, top_k=1):
                     'val_auroc': val_auroc,
                     'csv': csv_file
                 })
-        except Exception as e:
+        except Exception:
             continue
 
     # Sort by val_auroc descending and take top K
     model_results.sort(key=lambda x: x['val_auroc'], reverse=True)
     return model_results[:top_k]
-
-
-def load_model(model_path, in_features, pooling, embedding_level):
-    """Load model from checkpoint."""
-    if embedding_level:
-        model = models.PoolClf(in_features, 1, pooling)
-    else:
-        model = models.ClfPool(in_features, 1, pooling)
-    model.load_state_dict(torch.load(model_path, map_location='cpu', weights_only=True))
-    model.eval()
-    return model
-
-
-def get_predictions(model, X, lengths):
-    """Get predictions from a single model."""
-    with torch.no_grad():
-        logits, _ = model(X, lengths)
-        probs = torch.sigmoid(logits).squeeze().numpy()
-    return probs
 
 
 def ensemble_predict(models, X, lengths, method='soft'):
@@ -112,8 +86,7 @@ def ensemble_predict(models, X, lengths, method='soft'):
 def evaluate_ensemble(experiments_dir, dataset_dir, pooling_methods, seed, top_k=1, method='soft', name="Ensemble"):
     """Evaluate an ensemble of models."""
     # Load test data
-    test_data = torch.load(f'{dataset_dir}/seed={seed}/test.pth', map_location='cpu', weights_only=False)
-    X, lengths, y = test_data['X'], test_data['lengths'], test_data['y']
+    X, lengths, y = load_test_data(dataset_dir, seed)
     y = y.numpy().flatten()
 
     # Load models for each pooling method

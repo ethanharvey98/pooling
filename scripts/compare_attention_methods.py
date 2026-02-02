@@ -6,85 +6,23 @@ Usage:
     python scripts/compare_attention_methods.py
 """
 
-import ast
-import glob
 import os
-import sys
 
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 import numpy as np
-import torch
-from sklearn.model_selection import train_test_split
 
-sys.path.append('src')
-import models
+from rsna_utils import (
+    EXPERIMENTS_DIR, DATASET_DIR, LABELS_CSV, NUMPY_DIR, EMBEDDING_LEVEL,
+    find_best_model, load_model, get_attention, get_test_slice_labels, load_test_data
+)
 
 
-# Configuration
-EXPERIMENTS_DIR = '/cluster/tufts/hugheslab/dloevl01/pooling/experiments/RSNA/embedding_level=True'
-DATASET_DIR = '/cluster/tufts/hugheslab/dloevl01/encoded_RSNA/ViT_B_16'
-LABELS_CSV = '/cluster/tufts/hugheslab/datasets/RSNA/labels.csv'
-NUMPY_DIR = '/cluster/tufts/hugheslab/datasets/RSNA_numpy'
-EMBEDDING_LEVEL = True
+# Script-specific configuration
 SEED = 1001
 SCAN_SELECTION_SEED = 42  # For consistent random scan selection
 METHODS = ['ABMIL', 'TransMIL', 'SmAP']
 OUTPUT_DIR = 'figures'
-
-
-def find_best_model(experiments_dir, pooling, seed):
-    """Find best model by validation AUROC."""
-    pattern = os.path.join(experiments_dir, f"*pooling={pooling}*seed={seed}*.csv")
-    best_val_auroc, best_file = -1, None
-
-    for csv_file in glob.glob(pattern):
-        import pandas as pd
-        df = pd.read_csv(csv_file)
-        valid_df = df[df['val_auroc'] <= df['train_auroc']]
-        if valid_df.empty:
-            continue
-        idx = valid_df['val_auroc'].idxmax()
-        if df.loc[idx, 'val_auroc'] > best_val_auroc:
-            best_val_auroc = df.loc[idx, 'val_auroc']
-            best_file = csv_file.replace('.csv', '.pt')
-
-    return best_file, best_val_auroc
-
-
-def load_model(model_path, in_features, pooling, embedding_level):
-    """Load model from checkpoint."""
-    if embedding_level:
-        model = models.PoolClf(in_features, 1, pooling)
-    else:
-        model = models.ClfPool(in_features, 1, pooling)
-    model.load_state_dict(torch.load(model_path, map_location='cpu', weights_only=True))
-    model.eval()
-    return model
-
-
-def get_attention(model, X, lengths, embedding_level):
-    """Get attention weights from model."""
-    with torch.no_grad():
-        _, attn = model(X, lengths)
-        if embedding_level:
-            return attn.squeeze().numpy()
-        return torch.sigmoid(model.clf(X)).squeeze().numpy()
-
-
-def get_test_slice_labels(labels_csv, numpy_dir, seed):
-    """Get test set slice labels."""
-    import pandas as pd
-    df = pd.read_csv(labels_csv)
-    df['scan_label'] = df['Any'].apply(lambda x: 1 if any(ast.literal_eval(x)) else 0)
-    df['path'] = df['Study ID'].apply(lambda x: f'{numpy_dir}/{x}.npz')
-    df = df[df['path'].apply(os.path.exists)]
-
-    _, test_ids, _, _ = train_test_split(
-        df['Study ID'], df['scan_label'],
-        test_size=1/6, random_state=seed, stratify=df['scan_label']
-    )
-    test_df = df[df['Study ID'].isin(test_ids)]
-    return test_df['Study ID'].values, test_df['Any'].apply(lambda x: np.array(ast.literal_eval(x))).values
 
 
 def select_random_positive_scan(scan_ids, slice_labels, y, seed):
@@ -207,8 +145,6 @@ def plot_ground_truth_only(labels, scan_id, ct_slices, output_dir):
 
 def plot_combined(attentions, labels, scan_id, ct_slices, output_dir):
     """Plot combined figure with ground truth scans on top and line plot below."""
-    import matplotlib.gridspec as gridspec
-
     # Save and restore rcParams to avoid affecting other plots
     original_font_size = plt.rcParams.get('font.size', 10)
     plt.rcParams.update({"font.size": 10})
@@ -216,8 +152,8 @@ def plot_combined(attentions, labels, scan_id, ct_slices, output_dir):
     n_slices = len(labels)
     ncols, nrows = 10, 2
 
-    fig = plt.figure(figsize=(1 * ncols, 3 * nrows))
-    gs = gridspec.GridSpec(ncols=ncols, nrows=nrows)
+    fig = plt.figure(figsize=(1 * ncols, 2 * nrows))
+    gs = gridspec.GridSpec(ncols=ncols, nrows=nrows, hspace=0.3)
     axs_top = [fig.add_subplot(gs[0, i]) for i in range(ncols)]
     ax_bottom = fig.add_subplot(gs[1, :])
 
@@ -278,8 +214,7 @@ def main():
     print()
 
     # Load data
-    test_data = torch.load(f'{DATASET_DIR}/seed={SEED}/test.pth', map_location='cpu', weights_only=False)
-    X, lengths, y = test_data['X'], test_data['lengths'], test_data['y']
+    X, lengths, y = load_test_data(DATASET_DIR, SEED)
     scan_ids, slice_labels = get_test_slice_labels(LABELS_CSV, NUMPY_DIR, SEED)
 
     # Select random positive scan
@@ -301,7 +236,7 @@ def main():
     attentions = {}
 
     # Load methods
-    for method in ['ABMIL', 'TransMIL', 'SmAP']:
+    for method in METHODS:
         model_path, _ = find_best_model(EXPERIMENTS_DIR, method, SEED)
         if model_path:
             model = load_model(model_path, X.shape[1], method, EMBEDDING_LEVEL)
