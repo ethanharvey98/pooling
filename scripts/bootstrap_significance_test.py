@@ -215,6 +215,9 @@ def main():
     # Compute Pr(Delta > epsilon)
     prob_greater_epsilon = np.mean(diff_samples > args.epsilon)
 
+    # Find epsilon where 95% of samples are greater (5th percentile)
+    eps_95 = np.percentile(diff_samples, 5)
+
     print()
     print("=" * 80)
     print("Results")
@@ -228,6 +231,9 @@ def main():
     print()
     print(f"Pr(Δ > ε={args.epsilon}): {prob_greater_epsilon:.1%}")
     print(f"We are {prob_greater_epsilon:.1%} confident that {args.method1} improves AUROC by at least {args.epsilon}")
+    print()
+    print(f"ε at 95% confidence: {eps_95:.4f}")
+    print(f"We are 95% confident that {args.method1} improves AUROC by at least {eps_95:.4f}")
 
     if ci_lower > 0:
         print(f"\n{args.method1} is significantly better than {args.method2} (p < 0.05)")
