@@ -406,11 +406,11 @@ class SmAP(torch.nn.Module):
             ])
             attn_logits = self.mlp[1:](out)
         elif self.variant == 'early':
-            x_smoothed = torch.cat([
+            x = torch.cat([
                 self.sm_layer(x_i)
                 for x_i in torch.split(x, lengths)
             ])
-            attn_logits = self.mlp(x_smoothed)
+            attn_logits = self.mlp(x)
         # Same as ABMIL after smooth operator
         attn_weights = torch.cat([
             torch.nn.functional.softmax(attn_logits_i, dim=0)
