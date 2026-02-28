@@ -97,11 +97,11 @@ def plot_combined(attentions, labels, scan_id, ct_slices, output_dir):
 
     # Attention weights (already normalized via softmax in the model)
     colors = {
-        'ABMIL': '#9467BD',
-        'TransMIL': '#8C564B',
-        'SmAP': '#E377C2',
-        'GuidedABMIL': '#2CA02C',
-        'BayesianABMIL': '#17BECF',
+        'ABMIL': '#D62728',
+        'TransMIL': '#9467BD',
+        'SmAP': '#8C564B',
+        'GuidedABMIL': '#7F7F7F',
+        'BayesianABMIL': '#E377C2',
     }
     for method, attn in attentions.items():
         ax_bottom.plot(slice_nums, attn, color=colors[method], label=method, linewidth=3)
@@ -183,11 +183,11 @@ def plot_line_comparison(attentions, labels, scan_id, output_dir):
     # Attention weights (normalized)
     ax2 = ax1.twinx()
     colors = {
-        'ABMIL': '#9467BD',
-        'TransMIL': '#8C564B',
-        'SmAP': '#E377C2',
-        'GuidedABMIL': '#2CA02C',
-        'BayesianABMIL': '#17BECF',
+        'ABMIL': '#D62728',
+        'TransMIL': '#9467BD',
+        'SmAP': '#8C564B',
+        'GuidedABMIL': '#7F7F7F',
+        'BayesianABMIL': '#E377C2',
     }
 
     for method, attn in attentions.items():
