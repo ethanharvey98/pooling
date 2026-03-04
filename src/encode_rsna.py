@@ -8,6 +8,7 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 import torch
 import torchvision
+from tqdm import tqdm
 # Importing our custom module(s)
 import datasets
 import utils
@@ -141,7 +142,7 @@ if __name__ == '__main__':
 
     # Compute normalization stats from training set
     means, stds = [], []
-    for image, num_slices, label in train_dataset:
+    for image, num_slices, label in tqdm(train_dataset, desc='Computing normalization stats'):
         means.append(torch.mean(image, dim=(0, 2, 3)).tolist())
         stds.append(torch.std(image, dim=(0, 2, 3)).tolist())
 
@@ -202,7 +203,7 @@ if __name__ == '__main__':
     for split_name, dataset in [('train', train_dataset), ('val', val_dataset), ('test', test_dataset)]:
         X, lengths, y = [], [], []
 
-        for image, length, label in dataset:
+        for image, length, label in tqdm(dataset, desc=f'Encoding {split_name}'):
             if args.encoder == 'Qwen2.5-VL':
                 embeddings = encode_qwen_slices(model, image, device)
             else:
