@@ -110,17 +110,17 @@ if __name__ == '__main__':
     labels_df['bag_label'] = labels_df['Any_list'].apply(max)
 
     # Build paths to numpy files
-    labels_df['path'] = labels_df['Study'].apply(lambda sid: f'{args.numpy_dir}/{sid}.npz')
+    labels_df['path'] = labels_df['Study ID'].apply(lambda sid: f'{args.numpy_dir}/{sid}.npz')
 
     # Split by Study ID
-    ids = labels_df['Study']
+    ids = labels_df['Study ID']
     id_labels = labels_df['bag_label']
     train_and_val_ids, test_ids, train_and_val_id_labels, test_id_labels = train_test_split(ids, id_labels, test_size=1/6, random_state=args.seed, stratify=id_labels)
     train_ids, val_ids = train_test_split(train_and_val_ids, test_size=1/5, random_state=args.seed, stratify=train_and_val_id_labels)
 
-    train_df = labels_df[labels_df['Study'].isin(train_ids)]
-    val_df = labels_df[labels_df['Study'].isin(val_ids)]
-    test_df = labels_df[labels_df['Study'].isin(test_ids)]
+    train_df = labels_df[labels_df['Study ID'].isin(train_ids)]
+    val_df = labels_df[labels_df['Study ID'].isin(val_ids)]
+    test_df = labels_df[labels_df['Study ID'].isin(test_ids)]
 
     # Determine resize target based on encoder
     if args.encoder == 'Qwen2.5-VL':
