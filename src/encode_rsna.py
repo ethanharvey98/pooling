@@ -128,11 +128,11 @@ if __name__ == '__main__':
     else:
         resize_size = 224
 
-    # RSNA numpy format: (num_slices, 512, 512) — no channel dim
-    # Transform: read -> add channel dim -> pad -> resize -> normalize
+    # RSNA numpy format: (C, H, W, num_slices) — same as ADNI1
+    # Transform: read -> permute to (num_slices, C, H, W) -> pad -> resize -> normalize
     transform = torchvision.transforms.Compose([
         lambda path: utils.read_npz(path),
-        lambda image: image.unsqueeze(1),  # (num_slices, 1, 512, 512)
+        lambda image: image.permute(3, 0, 1, 2),  # (num_slices, C, H, W)
         lambda image: utils.pad_image(image),
         torchvision.transforms.Resize(size=(resize_size, resize_size)),
     ])
@@ -150,7 +150,7 @@ if __name__ == '__main__':
 
     transform = torchvision.transforms.Compose([
         lambda path: utils.read_npz(path),
-        lambda image: image.unsqueeze(1),  # (num_slices, 1, 512, 512)
+        lambda image: image.permute(3, 0, 1, 2),  # (num_slices, C, H, W)
         lambda image: utils.pad_image(image),
         torchvision.transforms.Resize(size=(resize_size, resize_size)),
         lambda image: (image - mean.view(1, -1, 1, 1)) / std.view(1, -1, 1, 1),
