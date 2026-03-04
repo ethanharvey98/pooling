@@ -1,6 +1,9 @@
 import argparse
 import ast
 import os
+
+os.environ['HF_HOME'] = os.path.join(os.getcwd(), '.hf_cache')
+os.environ['TRANSFORMERS_CACHE'] = os.path.join(os.getcwd(), '.hf_cache')
 import pandas as pd
 from sklearn.model_selection import train_test_split
 import torch
