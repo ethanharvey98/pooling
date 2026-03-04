@@ -186,9 +186,9 @@ if __name__ == '__main__':
         model.patch_embed.proj.in_channels = 1
         model.neck.append(torch.nn.AdaptiveAvgPool2d(output_size=(1, 1)))
     elif args.encoder == 'Qwen2.5-VL':
-        from transformers import Qwen2_5_VLForConditionalGeneration
-        full_model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-            args.model_name, torch_dtype=torch.float16, device_map="cpu"
+        from transformers import AutoModel
+        full_model = AutoModel.from_pretrained(
+            args.model_name, torch_dtype=torch.float16, device_map="cpu", trust_remote_code=True
         )
         model = full_model.visual
         del full_model
