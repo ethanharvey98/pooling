@@ -333,6 +333,228 @@ class ExactSm(Sm):
         A = A / rowsum.clamp_min(1e-20)
         return A
 
+class VAPGaussianAttention(torch.nn.Module):
+    def __init__(
+        self,
+        in_features: int,
+        hidden_dim: int = 128,
+    ):
+        super().__init__()
+        self.mlp = torch.nn.Sequential(
+            torch.nn.Linear(in_features=in_features, out_features=hidden_dim),
+            torch.nn.Tanh(),
+            torch.nn.Linear(in_features=hidden_dim, out_features=2),
+        )
+        self.deterministic = False
+        self.kl_loss = torch.tensor(0.0)
+        self._mu = None
+        self._log_sigma = None
+        self._last_attn_weights = None
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        lengths: Tuple[int, ...],
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        mlp_out = self.mlp(x)  # (N_total, 2)
+        mu_all, log_sigma_all = mlp_out[:, 0:1], mlp_out[:, 1:2]  # (N_total, 1) each
+
+        outs = []
+        attn_weights_list = []
+        kl_sum = 0.0
+        kl_count = 0
+
+        for mu_i, log_sigma_i, x_i in zip(
+            torch.split(mu_all, lengths),
+            torch.split(log_sigma_all, lengths),
+            torch.split(x, lengths),
+        ):
+            sigma_i = torch.exp(log_sigma_i)
+            if self.training and not self.deterministic:
+                eps = torch.randn_like(mu_i)
+                z = mu_i + sigma_i * eps
+            else:
+                z = mu_i
+            attn_w = torch.nn.functional.softmax(z, dim=0)
+            h = torch.sum(attn_w * x_i, dim=0, keepdim=True)
+            outs.append(h)
+            attn_weights_list.append(attn_w)
+            # KL[N(mu,sigma) || N(0,1)] = 0.5 * sum(mu^2 + sigma^2 - 1 - log(sigma^2))
+            kl = 0.5 * (mu_i ** 2 + sigma_i ** 2 - 1 - 2 * log_sigma_i)
+            kl_sum = kl_sum + kl.sum()
+            kl_count += mu_i.numel()
+
+        self.kl_loss = kl_sum / max(kl_count, 1)
+        self._mu = mu_all.detach()
+        self._log_sigma = log_sigma_all.detach()
+        self._last_attn_weights = torch.cat(attn_weights_list).detach()
+
+        out = torch.cat(outs)
+        attn_weights = torch.cat(attn_weights_list)
+        return out, attn_weights
+
+
+class VAPBernoulliAttention(torch.nn.Module):
+    def __init__(
+        self,
+        in_features: int,
+        hidden_dim: int = 128,
+        estimator: str = 'gumbel',
+        pi_0: float = 0.1,
+        tau_start: float = 1.0,
+        tau_min: float = 0.1,
+        anneal_rate: float = 0.95,
+    ):
+        super().__init__()
+        assert estimator in ('gumbel', 'straight_through', 'reinforce')
+        self.mlp = torch.nn.Sequential(
+            torch.nn.Linear(in_features=in_features, out_features=hidden_dim),
+            torch.nn.Tanh(),
+            torch.nn.Linear(in_features=hidden_dim, out_features=1),
+        )
+        self.estimator = estimator
+        self.pi_0 = pi_0
+        self.tau = tau_start
+        self.tau_min = tau_min
+        self.anneal_rate = anneal_rate
+        self.kl_loss = torch.tensor(0.0)
+        self._probs = None
+        self._z_mask = None
+        self._log_prob = None
+
+    def anneal_temperature(self):
+        self.tau = max(self.tau * self.anneal_rate, self.tau_min)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        lengths: Tuple[int, ...],
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        logits = self.mlp(x)  # (N_total, 1)
+        p = torch.sigmoid(logits)
+
+        if self.training:
+            if self.estimator == 'gumbel':
+                u = torch.rand_like(logits).clamp(1e-6, 1 - 1e-6)
+                gumbel_noise = torch.log(u) - torch.log(1 - u)
+                z = torch.sigmoid((logits + gumbel_noise) / self.tau)
+            elif self.estimator == 'straight_through':
+                z_hard = torch.bernoulli(p)
+                z = z_hard + p - p.detach()  # straight-through
+            elif self.estimator == 'reinforce':
+                dist = torch.distributions.Bernoulli(probs=p)
+                z_hard = dist.sample()
+                self._log_prob = dist.log_prob(z_hard)
+                z = z_hard
+        else:
+            # Hard threshold at 0.5
+            z = (p >= 0.5).float()
+
+        outs = []
+        attn_weights_list = []
+        kl_sum = 0.0
+        kl_count = 0
+        eps = 1e-8
+
+        for z_i, x_i, p_i in zip(
+            torch.split(z, lengths),
+            torch.split(x, lengths),
+            torch.split(p, lengths),
+        ):
+            # Fallback: if all instances off, keep top-1 by probability
+            if not self.training and z_i.sum() == 0:
+                idx = p_i.argmax(dim=0)
+                z_i = torch.zeros_like(z_i)
+                z_i[idx] = 1.0
+
+            z_sum = z_i.sum() + eps
+            h = torch.sum(z_i * x_i, dim=0, keepdim=True) / z_sum
+            outs.append(h)
+            # Normalized z as attention weights
+            attn_w = z_i / z_sum
+            attn_weights_list.append(attn_w)
+            # KL[Bernoulli(p) || Bernoulli(pi_0)]
+            pi_0 = self.pi_0
+            kl = p_i * torch.log(p_i.clamp(min=eps) / pi_0) + \
+                 (1 - p_i) * torch.log((1 - p_i).clamp(min=eps) / (1 - pi_0))
+            kl_sum = kl_sum + kl.sum()
+            kl_count += p_i.numel()
+
+        self.kl_loss = kl_sum / max(kl_count, 1)
+        self._probs = p.detach()
+        self._z_mask = z.detach()
+
+        out = torch.cat(outs)
+        attn_weights = torch.cat(attn_weights_list)
+        return out, attn_weights
+
+
+class VAPGaussianSparseAttention(torch.nn.Module):
+    def __init__(
+        self,
+        in_features: int,
+        hidden_dim: int = 128,
+        prior_scale: float = 1.0,
+    ):
+        super().__init__()
+        self.mlp = torch.nn.Sequential(
+            torch.nn.Linear(in_features=in_features, out_features=hidden_dim),
+            torch.nn.Tanh(),
+            torch.nn.Linear(in_features=hidden_dim, out_features=2),
+        )
+        self.prior_scale = prior_scale
+        self.deterministic = False
+        self.kl_loss = torch.tensor(0.0)
+        self._mu = None
+        self._log_sigma = None
+        self._last_attn_weights = None
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        lengths: Tuple[int, ...],
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        mlp_out = self.mlp(x)  # (N_total, 2)
+        mu_all, log_sigma_all = mlp_out[:, 0:1], mlp_out[:, 1:2]
+
+        outs = []
+        attn_weights_list = []
+        kl_sum = 0.0
+        kl_count = 0
+        b = self.prior_scale
+        pi = 3.141592653589793
+
+        for mu_i, log_sigma_i, x_i in zip(
+            torch.split(mu_all, lengths),
+            torch.split(log_sigma_all, lengths),
+            torch.split(x, lengths),
+        ):
+            sigma_i = torch.exp(log_sigma_i)
+            if self.training and not self.deterministic:
+                eps = torch.randn_like(mu_i)
+                z = mu_i + sigma_i * eps
+            else:
+                z = mu_i
+            attn_w = torch.nn.functional.softmax(z, dim=0)
+            h = torch.sum(attn_w * x_i, dim=0, keepdim=True)
+            outs.append(h)
+            attn_weights_list.append(attn_w)
+            # KL[N(mu,sigma) || Laplace(0,b)] approximation
+            kl = torch.log(2 * b / (sigma_i * (2 * pi) ** 0.5 + 1e-8)) + \
+                 (sigma_i ** 2 + mu_i ** 2) / (2 * b ** 2) - 0.5
+            kl_sum = kl_sum + kl.sum()
+            kl_count += mu_i.numel()
+
+        self.kl_loss = kl_sum / max(kl_count, 1)
+        self._mu = mu_all.detach()
+        self._log_sigma = log_sigma_all.detach()
+        self._last_attn_weights = torch.cat(attn_weights_list).detach()
+
+        out = torch.cat(outs)
+        attn_weights = torch.cat(attn_weights_list)
+        return out, attn_weights
+
+
 class SmAP(torch.nn.Module):
     def __init__(
         self,

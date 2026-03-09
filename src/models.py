@@ -46,6 +46,116 @@ class PoolClf(torch.nn.Module):
         out = self.clf(out)
         return out, attn_weights
     
+class VAPGaussianMIL(torch.nn.Module):
+    def __init__(self, in_features, out_features=1, hidden_dim=128):
+        super().__init__()
+        self.pool = layers.VAPGaussianAttention(in_features, hidden_dim)
+        self.clf = torch.nn.Linear(in_features, out_features)
+
+    def forward(self, x, lengths):
+        out, attn_weights = self.pool(x, lengths)
+        logits = self.clf(out)
+        self.kl_loss = self.pool.kl_loss
+        return logits, attn_weights
+
+    def get_attention_weights(self):
+        return {
+            'mu': self.pool._mu,
+            'log_sigma': self.pool._log_sigma,
+            'attn_weights': self.pool._last_attn_weights,
+        }
+
+    def predict_with_uncertainty(self, x, lengths, n_samples=10):
+        self.pool.deterministic = False
+        logits_list, attn_list = [], []
+        with torch.no_grad():
+            for _ in range(n_samples):
+                logits, attn = self.forward(x, lengths)
+                logits_list.append(logits)
+                attn_list.append(attn)
+        self.pool.deterministic = True
+        return {
+            'logits_mean': torch.stack(logits_list).mean(0),
+            'logits_var': torch.stack(logits_list).var(0),
+            'attn_samples': torch.stack(attn_list),
+        }
+
+
+class VAPBernoulliMIL(torch.nn.Module):
+    def __init__(self, in_features, out_features=1, hidden_dim=128,
+                 estimator='gumbel', pi_0=0.1, tau_start=1.0, tau_min=0.1, anneal_rate=0.95):
+        super().__init__()
+        self.pool = layers.VAPBernoulliAttention(
+            in_features, hidden_dim, estimator=estimator,
+            pi_0=pi_0, tau_start=tau_start, tau_min=tau_min, anneal_rate=anneal_rate,
+        )
+        self.clf = torch.nn.Linear(in_features, out_features)
+
+    def forward(self, x, lengths):
+        out, attn_weights = self.pool(x, lengths)
+        logits = self.clf(out)
+        self.kl_loss = self.pool.kl_loss
+        return logits, attn_weights
+
+    def get_attention_weights(self):
+        return {
+            'probs': self.pool._probs,
+            'z_mask': self.pool._z_mask,
+        }
+
+    def predict_with_uncertainty(self, x, lengths, n_samples=10):
+        was_training = self.training
+        self.train()
+        logits_list, attn_list = [], []
+        with torch.no_grad():
+            for _ in range(n_samples):
+                logits, attn = self.forward(x, lengths)
+                logits_list.append(logits)
+                attn_list.append(attn)
+        if not was_training:
+            self.eval()
+        return {
+            'logits_mean': torch.stack(logits_list).mean(0),
+            'logits_var': torch.stack(logits_list).var(0),
+            'attn_samples': torch.stack(attn_list),
+        }
+
+
+class VAPGaussianSparseMIL(torch.nn.Module):
+    def __init__(self, in_features, out_features=1, hidden_dim=128, prior_scale=1.0):
+        super().__init__()
+        self.pool = layers.VAPGaussianSparseAttention(in_features, hidden_dim, prior_scale=prior_scale)
+        self.clf = torch.nn.Linear(in_features, out_features)
+
+    def forward(self, x, lengths):
+        out, attn_weights = self.pool(x, lengths)
+        logits = self.clf(out)
+        self.kl_loss = self.pool.kl_loss
+        return logits, attn_weights
+
+    def get_attention_weights(self):
+        return {
+            'mu': self.pool._mu,
+            'log_sigma': self.pool._log_sigma,
+            'attn_weights': self.pool._last_attn_weights,
+        }
+
+    def predict_with_uncertainty(self, x, lengths, n_samples=10):
+        self.pool.deterministic = False
+        logits_list, attn_list = [], []
+        with torch.no_grad():
+            for _ in range(n_samples):
+                logits, attn = self.forward(x, lengths)
+                logits_list.append(logits)
+                attn_list.append(attn)
+        self.pool.deterministic = True
+        return {
+            'logits_mean': torch.stack(logits_list).mean(0),
+            'logits_var': torch.stack(logits_list).var(0),
+            'attn_samples': torch.stack(attn_list),
+        }
+
+
 class OnTheDesign(torch.nn.Module):
     def __init__(self, num_classes, expansion=4, type_name="conv3x3x3", norm_type="Instance"):
         super().__init__()

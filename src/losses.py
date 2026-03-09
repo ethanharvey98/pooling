@@ -45,6 +45,48 @@ class L2Loss(torch.nn.Module):
         
         return {'loss': nll + penalty, 'nll': nll}
 
+class VAPLoss(torch.nn.Module):
+    def __init__(self, beta=1.0, criterion=torch.nn.BCEWithLogitsLoss()):
+        super().__init__()
+        self.beta = beta
+        self.criterion = criterion
+
+    def forward(self, logits, labels, **kwargs):
+        model = kwargs['model']
+        nll = self.criterion(logits, labels)
+        kl_loss = model.kl_loss
+        total = nll + self.beta * kl_loss
+        return {'loss': total, 'nll': nll, 'kl': kl_loss}
+
+
+class VAPREINFORCELoss(torch.nn.Module):
+    def __init__(self, beta=1.0, criterion=torch.nn.BCEWithLogitsLoss()):
+        super().__init__()
+        self.beta = beta
+        self.criterion = criterion
+        self._baseline = None
+        self._baseline_momentum = 0.9
+
+    def forward(self, logits, labels, **kwargs):
+        model = kwargs['model']
+        nll = self.criterion(logits, labels)
+        kl_loss = model.kl_loss
+
+        # REINFORCE term
+        log_prob = model.pool._log_prob  # (N_total, 1)
+        task_loss = nll.detach()
+
+        if self._baseline is None:
+            self._baseline = task_loss.item()
+        advantage = task_loss - self._baseline
+        self._baseline = self._baseline_momentum * self._baseline + \
+                         (1 - self._baseline_momentum) * task_loss.item()
+
+        reinforce_term = (advantage * log_prob).mean()
+        total = nll + self.beta * kl_loss + reinforce_term
+        return {'loss': total, 'nll': nll, 'kl': kl_loss}
+
+
 class GuidedAttentionL1Loss(torch.nn.Module):
     def __init__(self, alpha, beta, criterion=torch.nn.CrossEntropyLoss(), max_std=1000.0, min_std=1.0):
         super().__init__()
