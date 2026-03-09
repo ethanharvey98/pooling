@@ -333,6 +333,51 @@ class ExactSm(Sm):
         A = A / rowsum.clamp_min(1e-20)
         return A
 
+class SmTransformerLayer(torch.nn.Module):
+    def __init__(self, in_features, num_heads=8, alpha=0.5, num_steps=10, neighbors=1):
+        super().__init__()
+        self.norm = torch.nn.LayerNorm(normalized_shape=in_features)
+        self.attn = torch.nn.MultiheadAttention(embed_dim=in_features, num_heads=num_heads)
+        self.sm_layer = ApproxSm(alpha=alpha, learnable_alpha=True, num_steps=num_steps, neighbors=neighbors)
+
+    def forward(self, x, lengths):
+        attn_outs, attn_weights = zip(*[
+            self.attn(x_i, x_i, x_i)
+            for x_i in torch.split(self.norm(x), lengths)
+        ])
+        smoothed = torch.cat([
+            self.sm_layer(out_i) for out_i in attn_outs
+        ])
+        out = x + smoothed
+        return out, attn_weights
+
+class SmTAP(torch.nn.Module):
+    def __init__(self, in_features, num_heads=8, alpha=0.5, num_steps=10, neighbors=1):
+        super().__init__()
+        self.cls_token = torch.nn.Parameter(torch.randn(size=(1, in_features,)))
+        self.layer1 = SmTransformerLayer(in_features, num_heads, alpha, num_steps, neighbors)
+        self.pos_layer = PPEG(in_features=in_features)
+        self.layer2 = SmTransformerLayer(in_features, num_heads, alpha, num_steps, neighbors)
+
+    def forward(self, x, lengths):
+        x = torch.cat([
+            torch.cat((self.cls_token, x_i))
+            for x_i in torch.split(x, lengths)
+        ])
+        lengths = tuple(length + 1 for length in lengths)
+        out, _ = self.layer1(x, lengths)
+        out = self.pos_layer(out, lengths)
+        out, attn_weights = self.layer2(out, lengths)
+        out = torch.stack([
+            out_i[0,:]
+            for out_i in torch.split(out, lengths)
+        ])
+        attn_weights = torch.cat([
+            attn_weights_i[0,1:]
+            for attn_weights_i in attn_weights
+        ])
+        return out, attn_weights
+
 class SmAP(torch.nn.Module):
     def __init__(
         self,
