@@ -370,7 +370,7 @@ class VAPGaussianAttention(torch.nn.Module):
             torch.split(x, lengths),
         ):
             sigma_i = torch.exp(log_sigma_i)
-            if self.training and not self.deterministic:
+            if not self.deterministic:
                 eps = torch.randn_like(mu_i)
                 z = mu_i + sigma_i * eps
             else:
@@ -530,7 +530,7 @@ class VAPGaussianSparseAttention(torch.nn.Module):
             torch.split(x, lengths),
         ):
             sigma_i = torch.exp(log_sigma_i)
-            if self.training and not self.deterministic:
+            if not self.deterministic:
                 eps = torch.randn_like(mu_i)
                 z = mu_i + sigma_i * eps
             else:

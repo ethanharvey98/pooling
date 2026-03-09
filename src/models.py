@@ -53,6 +53,10 @@ class VAPGaussianMIL(torch.nn.Module):
         self.clf = torch.nn.Linear(in_features, out_features)
 
     def forward(self, x, lengths):
+        # Default: sample during training, deterministic during eval
+        # predict_with_uncertainty overrides this explicitly
+        if not hasattr(self, '_uncertainty_mode'):
+            self.pool.deterministic = not self.training
         out, attn_weights = self.pool(x, lengths)
         logits = self.clf(out)
         self.kl_loss = self.pool.kl_loss
@@ -66,6 +70,7 @@ class VAPGaussianMIL(torch.nn.Module):
         }
 
     def predict_with_uncertainty(self, x, lengths, n_samples=10):
+        self._uncertainty_mode = True
         self.pool.deterministic = False
         logits_list, attn_list = [], []
         with torch.no_grad():
@@ -74,6 +79,7 @@ class VAPGaussianMIL(torch.nn.Module):
                 logits_list.append(logits)
                 attn_list.append(attn)
         self.pool.deterministic = True
+        del self._uncertainty_mode
         return {
             'logits_mean': torch.stack(logits_list).mean(0),
             'logits_var': torch.stack(logits_list).var(0),
@@ -128,6 +134,8 @@ class VAPGaussianSparseMIL(torch.nn.Module):
         self.clf = torch.nn.Linear(in_features, out_features)
 
     def forward(self, x, lengths):
+        if not hasattr(self, '_uncertainty_mode'):
+            self.pool.deterministic = not self.training
         out, attn_weights = self.pool(x, lengths)
         logits = self.clf(out)
         self.kl_loss = self.pool.kl_loss
@@ -141,6 +149,7 @@ class VAPGaussianSparseMIL(torch.nn.Module):
         }
 
     def predict_with_uncertainty(self, x, lengths, n_samples=10):
+        self._uncertainty_mode = True
         self.pool.deterministic = False
         logits_list, attn_list = [], []
         with torch.no_grad():
@@ -149,6 +158,7 @@ class VAPGaussianSparseMIL(torch.nn.Module):
                 logits_list.append(logits)
                 attn_list.append(attn)
         self.pool.deterministic = True
+        del self._uncertainty_mode
         return {
             'logits_mean': torch.stack(logits_list).mean(0),
             'logits_var': torch.stack(logits_list).var(0),
