@@ -177,6 +177,35 @@ def evaluate_with_uncertainty(model, X, lengths, y, mc_samples, filter_pct):
     auroc_var_attn = roc_auc_score(labels, probs_var_attn)
     auroc_neg_var_attn = roc_auc_score(labels, probs_neg_var_attn)
 
+    # Strategy 4: Adaptive softmax temperature from bag-level uncertainty
+    # tau = 1 + scale * normalized_var  (uncertain bags get higher temp -> softer attention)
+    # Get the learned attention logits (mu) from the model
+    with torch.no_grad():
+        _, _ = model(X, lengths)  # populate _mu
+    attn_logits_mu = model.pool._mu.squeeze().numpy()  # (N_total,)
+
+    # Normalize bag-level variance to [0, 1] range
+    var_min, var_max = logits_var.min(), logits_var.max()
+    if var_max > var_min:
+        norm_var = (logits_var - var_min) / (var_max - var_min)
+    else:
+        norm_var = np.zeros_like(logits_var)
+
+    probs_adaptive_temp = np.zeros(len(labels))
+    start = 0
+    for i, length in enumerate(lengths):
+        x_bag = X[start:start + length]
+        mu_bag = torch.from_numpy(attn_logits_mu[start:start + length]).float()
+
+        # tau: certain bags -> ~1 (sharp), uncertain bags -> higher (softer)
+        tau = 1.0 + 4.0 * norm_var[i]  # ranges from 1 to 5
+        attn_w = torch.nn.functional.softmax(mu_bag / tau, dim=0).unsqueeze(1)
+        pooled = (attn_w * x_bag).sum(dim=0, keepdim=True)
+        logit = (pooled @ clf_weight.T + clf_bias).item()
+        probs_adaptive_temp[i] = 1.0 / (1.0 + np.exp(-logit))
+        start += length
+    auroc_adaptive_temp = roc_auc_score(labels, probs_adaptive_temp)
+
     return {
         'auroc_all': auroc_all,
         'auroc_filtered': auroc_filtered,
@@ -184,6 +213,7 @@ def evaluate_with_uncertainty(model, X, lengths, y, mc_samples, filter_pct):
         'auroc_zeroed': auroc_zeroed,
         'auroc_var_attn': auroc_var_attn,
         'auroc_neg_var_attn': auroc_neg_var_attn,
+        'auroc_adaptive_temp': auroc_adaptive_temp,
         'n_total': len(labels),
         'n_kept': int(keep.sum()),
         'n_uncertain': int(uncertain_mask.sum()),
@@ -231,6 +261,7 @@ def main():
         zeroed_aurocs = []
         var_attn_aurocs = []
         neg_var_attn_aurocs = []
+        adaptive_temp_aurocs = []
 
         for seed in SEEDS:
             seed_files = [f for f in csv_files
@@ -261,6 +292,7 @@ def main():
                 zeroed_aurocs.append(unc_result['auroc_zeroed'])
                 var_attn_aurocs.append(unc_result['auroc_var_attn'])
                 neg_var_attn_aurocs.append(unc_result['auroc_neg_var_attn'])
+                adaptive_temp_aurocs.append(unc_result['auroc_adaptive_temp'])
                 pct = args.filter_pct * 100
                 print(f"           AUROC (all):               {unc_result['auroc_all']:.4f}")
                 print(f"           AUROC (drop uncertain):    {unc_result['auroc_filtered']:.4f}  "
@@ -273,6 +305,8 @@ def main():
                       f"(attend to uncertain)")
                 print(f"           AUROC (-var as attn logits):{unc_result['auroc_neg_var_attn']:.4f}  "
                       f"(attend to certain)")
+                print(f"           AUROC (adaptive temp):     {unc_result['auroc_adaptive_temp']:.4f}  "
+                      f"(tau=1+4*norm_var)")
 
         if test_aurocs:
             mean = np.mean(test_aurocs)
@@ -285,6 +319,7 @@ def main():
             print(f"  >> zero uncertain inst:      {np.mean(zeroed_aurocs):.4f} +/- {np.std(zeroed_aurocs):.4f}")
             print(f"  >> var as attn (uncertain):  {np.mean(var_attn_aurocs):.4f} +/- {np.std(var_attn_aurocs):.4f}")
             print(f"  >> -var as attn (certain):   {np.mean(neg_var_attn_aurocs):.4f} +/- {np.std(neg_var_attn_aurocs):.4f}")
+            print(f"  >> adaptive temp:            {np.mean(adaptive_temp_aurocs):.4f} +/- {np.std(adaptive_temp_aurocs):.4f}")
 
         print()
 
