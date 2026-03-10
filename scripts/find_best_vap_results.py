@@ -150,11 +150,40 @@ def evaluate_with_uncertainty(model, X, lengths, y, mc_samples, filter_pct):
         start += length
     auroc_zeroed = roc_auc_score(labels, probs_zeroed)
 
+    # Strategy 3: Use slice uncertainty as attention logits
+    # High variance = uncertain = attend more (var_as_logits)
+    # Low variance = certain = attend more (neg_var_as_logits)
+    probs_var_attn = np.zeros(len(labels))
+    probs_neg_var_attn = np.zeros(len(labels))
+    start = 0
+    for i, length in enumerate(lengths):
+        x_bag = X[start:start + length]
+        inst_var = attn_var[start:start + length]
+
+        # Softmax over variance -> attend to uncertain slices
+        var_logits = torch.from_numpy(inst_var).float()
+        var_weights = torch.nn.functional.softmax(var_logits, dim=0).unsqueeze(1)
+        pooled = (var_weights * x_bag).sum(dim=0, keepdim=True)
+        logit = (pooled @ clf_weight.T + clf_bias).item()
+        probs_var_attn[i] = 1.0 / (1.0 + np.exp(-logit))
+
+        # Softmax over negative variance -> attend to certain slices
+        neg_var_weights = torch.nn.functional.softmax(-var_logits, dim=0).unsqueeze(1)
+        pooled = (neg_var_weights * x_bag).sum(dim=0, keepdim=True)
+        logit = (pooled @ clf_weight.T + clf_bias).item()
+        probs_neg_var_attn[i] = 1.0 / (1.0 + np.exp(-logit))
+
+        start += length
+    auroc_var_attn = roc_auc_score(labels, probs_var_attn)
+    auroc_neg_var_attn = roc_auc_score(labels, probs_neg_var_attn)
+
     return {
         'auroc_all': auroc_all,
         'auroc_filtered': auroc_filtered,
         'auroc_meanpool': auroc_meanpool,
         'auroc_zeroed': auroc_zeroed,
+        'auroc_var_attn': auroc_var_attn,
+        'auroc_neg_var_attn': auroc_neg_var_attn,
         'n_total': len(labels),
         'n_kept': int(keep.sum()),
         'n_uncertain': int(uncertain_mask.sum()),
@@ -200,6 +229,8 @@ def main():
         filtered_aurocs = []
         meanpool_aurocs = []
         zeroed_aurocs = []
+        var_attn_aurocs = []
+        neg_var_attn_aurocs = []
 
         for seed in SEEDS:
             seed_files = [f for f in csv_files
@@ -228,14 +259,20 @@ def main():
                 filtered_aurocs.append(unc_result['auroc_filtered'])
                 meanpool_aurocs.append(unc_result['auroc_meanpool'])
                 zeroed_aurocs.append(unc_result['auroc_zeroed'])
+                var_attn_aurocs.append(unc_result['auroc_var_attn'])
+                neg_var_attn_aurocs.append(unc_result['auroc_neg_var_attn'])
                 pct = args.filter_pct * 100
-                print(f"           AUROC (all):              {unc_result['auroc_all']:.4f}")
-                print(f"           AUROC (drop uncertain):   {unc_result['auroc_filtered']:.4f}  "
+                print(f"           AUROC (all):               {unc_result['auroc_all']:.4f}")
+                print(f"           AUROC (drop uncertain):    {unc_result['auroc_filtered']:.4f}  "
                       f"(kept {unc_result['n_kept']}/{unc_result['n_total']})")
                 print(f"           AUROC (meanpool uncertain):{unc_result['auroc_meanpool']:.4f}  "
                       f"(meanpool {unc_result['n_uncertain']} bags)")
                 print(f"           AUROC (zero uncertain inst):{unc_result['auroc_zeroed']:.4f}  "
                       f"(zeroed top {pct:.0f}% inst per bag)")
+                print(f"           AUROC (var as attn logits): {unc_result['auroc_var_attn']:.4f}  "
+                      f"(attend to uncertain)")
+                print(f"           AUROC (-var as attn logits):{unc_result['auroc_neg_var_attn']:.4f}  "
+                      f"(attend to certain)")
 
         if test_aurocs:
             mean = np.mean(test_aurocs)
@@ -243,9 +280,11 @@ def main():
             print(f"\n  >> {model_type}: {mean:.4f} +/- {std:.4f}  (n={len(test_aurocs)})")
 
         if filtered_aurocs:
-            print(f"  >> drop uncertain bags:    {np.mean(filtered_aurocs):.4f} +/- {np.std(filtered_aurocs):.4f}")
-            print(f"  >> meanpool uncertain bags:{np.mean(meanpool_aurocs):.4f} +/- {np.std(meanpool_aurocs):.4f}")
-            print(f"  >> zero uncertain inst:    {np.mean(zeroed_aurocs):.4f} +/- {np.std(zeroed_aurocs):.4f}")
+            print(f"  >> drop uncertain bags:     {np.mean(filtered_aurocs):.4f} +/- {np.std(filtered_aurocs):.4f}")
+            print(f"  >> meanpool uncertain bags:  {np.mean(meanpool_aurocs):.4f} +/- {np.std(meanpool_aurocs):.4f}")
+            print(f"  >> zero uncertain inst:      {np.mean(zeroed_aurocs):.4f} +/- {np.std(zeroed_aurocs):.4f}")
+            print(f"  >> var as attn (uncertain):  {np.mean(var_attn_aurocs):.4f} +/- {np.std(var_attn_aurocs):.4f}")
+            print(f"  >> -var as attn (certain):   {np.mean(neg_var_attn_aurocs):.4f} +/- {np.std(neg_var_attn_aurocs):.4f}")
 
         print()
 
