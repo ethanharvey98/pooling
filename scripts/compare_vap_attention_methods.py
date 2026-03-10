@@ -3,8 +3,8 @@
 Compare VAP attention weights across methods on a single scan, with uncertainty bands.
 
 Usage:
-    python scripts/compare_vap_attention_methods.py
-    python scripts/compare_vap_attention_methods.py --seed 2001 --mc_samples 30
+    python scripts/compare_vap_attention_methods.py --experiments_dirs dir1 dir2
+    python scripts/compare_vap_attention_methods.py --experiments_dirs vap_exps/ center_exps/ abmil_exps/
 """
 
 import argparse
@@ -31,41 +31,49 @@ LABELS_CSV = '/cluster/tufts/hugheslab/datasets/RSNA/labels.csv'
 NUMPY_DIR = '/cluster/tufts/hugheslab/datasets/RSNA_numpy'
 SEED = 1001
 SCAN_SELECTION_SEED = 42
-MODEL_TYPES = ['VAPGaussian', 'VAPGaussianCenter', 'VAPBernoulli', 'VAPGaussianSparse']
+MODEL_TYPES = ['ABMIL', 'VAPGaussian', 'VAPGaussianCenter', 'VAPBernoulli', 'VAPGaussianSparse']
 OUTPUT_DIR = 'figures/vap_attention'
 
 
-def find_best_model(experiments_dir, model_type, seed):
-    """Find best model .pt file by val_auroc."""
-    pattern = os.path.join(experiments_dir, f"model={model_type}_*seed={seed}*.csv")
+def find_best_model(experiments_dirs, method, seed):
+    """Find best model .pt file by val_auroc, searching multiple directories."""
+    # VAP models use model=Type_*, ABMIL uses pooling=ABMIL*
+    if method == 'ABMIL':
+        patterns = [os.path.join(d, f"*pooling=ABMIL*seed={seed}*.csv") for d in experiments_dirs]
+    else:
+        patterns = [os.path.join(d, f"model={method}_*seed={seed}*.csv") for d in experiments_dirs]
+
     best_val_auroc, best_file = -1, None
-    for csv_file in glob.glob(pattern):
-        try:
-            df = pd.read_csv(csv_file)
-        except Exception:
-            continue
-        if 'val_auroc' not in df.columns or 'train_auroc' not in df.columns:
-            continue
-        valid_df = df[df['val_auroc'] <= df['train_auroc']]
-        if valid_df.empty:
-            continue
-        idx = valid_df['val_auroc'].idxmax()
-        if df.loc[idx, 'val_auroc'] > best_val_auroc:
-            best_val_auroc = df.loc[idx, 'val_auroc']
-            best_file = csv_file.replace('.csv', '.pt')
+    for pattern in patterns:
+        for csv_file in glob.glob(pattern):
+            try:
+                df = pd.read_csv(csv_file)
+            except Exception:
+                continue
+            if 'val_auroc' not in df.columns or 'train_auroc' not in df.columns:
+                continue
+            valid_df = df[df['val_auroc'] <= df['train_auroc']]
+            if valid_df.empty:
+                continue
+            idx = valid_df['val_auroc'].idxmax()
+            if df.loc[idx, 'val_auroc'] > best_val_auroc:
+                best_val_auroc = df.loc[idx, 'val_auroc']
+                best_file = csv_file.replace('.csv', '.pt')
     return best_file, best_val_auroc
 
 
-def load_vap_model(model_path, in_features, model_type):
-    """Load a VAP model from checkpoint."""
-    if model_type in ('VAPGaussian', 'VAPGaussianCenter'):
+def load_model(model_path, in_features, method):
+    """Load a model from checkpoint."""
+    if method in ('VAPGaussian', 'VAPGaussianCenter'):
         model = models.VAPGaussianMIL(in_features=in_features, out_features=1)
-    elif model_type == 'VAPBernoulli':
+    elif method == 'VAPBernoulli':
         model = models.VAPBernoulliMIL(in_features=in_features, out_features=1)
-    elif model_type == 'VAPGaussianSparse':
+    elif method == 'VAPGaussianSparse':
         model = models.VAPGaussianSparseMIL(in_features=in_features, out_features=1)
+    elif method == 'ABMIL':
+        model = models.PoolClf(in_features=in_features, out_features=1, pooling='ABMIL')
     else:
-        raise ValueError(f"Unknown model_type: {model_type}")
+        raise ValueError(f"Unknown method: {method}")
     model.load_state_dict(torch.load(model_path, map_location='cpu', weights_only=True))
     model.eval()
     return model
@@ -148,6 +156,7 @@ def plot_combined_with_uncertainty(attentions, uncertainties, labels, scan_id, c
     ax_bottom.fill_between(slice_nums, gt_normalized, alpha=0.3, color="#1F77B4")
 
     colors = {
+        'ABMIL': '#2CA02C',
         'VAPGaussian': '#D62728',
         'VAPGaussianCenter': '#FF7F0E',
         'VAPBernoulli': '#9467BD',
@@ -198,6 +207,7 @@ def plot_line_with_uncertainty(attentions, uncertainties, labels, scan_id, outpu
 
     ax2 = ax1.twinx()
     colors = {
+        'ABMIL': '#2CA02C',
         'VAPGaussian': '#D62728',
         'VAPGaussianCenter': '#FF7F0E',
         'VAPBernoulli': '#9467BD',
@@ -288,7 +298,8 @@ def plot_grid_with_uncertainty(attentions, uncertainties, labels, scan_id, ct_sl
 
 def main():
     parser = argparse.ArgumentParser(description='Compare VAP attention methods with uncertainty')
-    parser.add_argument('--experiments_dir', default=EXPERIMENTS_DIR, type=str)
+    parser.add_argument('--experiments_dirs', nargs='+', default=[EXPERIMENTS_DIR],
+                        help='One or more experiment directories to search for models')
     parser.add_argument('--dataset_dir', default=DATASET_DIR, type=str)
     parser.add_argument('--labels_csv', default=LABELS_CSV, type=str)
     parser.add_argument('--numpy_dir', default=NUMPY_DIR, type=str)
@@ -300,8 +311,9 @@ def main():
     args = parser.parse_args()
 
     print("=" * 80)
-    print("VAP Attention Comparison with Uncertainty")
+    print("Attention Comparison with Uncertainty")
     print(f"  MC samples: {args.mc_samples}")
+    print(f"  Searching: {', '.join(args.experiments_dirs)}")
     print("=" * 80)
 
     X, lengths, y = load_test_data(args.dataset_dir, args.seed)
@@ -324,25 +336,28 @@ def main():
     uncertainties = {}
 
     for method in args.methods:
-        model_path, val_auroc = find_best_model(args.experiments_dir, method, args.seed)
+        model_path, val_auroc = find_best_model(args.experiments_dirs, method, args.seed)
         if not model_path or not os.path.exists(model_path):
             print(f"{method}: not found, skipping")
             continue
 
-        model = load_vap_model(model_path, X.shape[1], method)
+        model = load_model(model_path, X.shape[1], method)
 
-        # MC samples for uncertainty
-        attn_samples = get_attention_with_uncertainty(model, X, lengths, args.mc_samples)
-        # Extract this scan's attention: (mc_samples, length)
-        scan_attn = attn_samples[:, start:start + length]
-        attn_mean = scan_attn.mean(axis=0)
-        attn_std = scan_attn.std(axis=0)
-
-        attentions[method] = attn_mean
-        uncertainties[method] = attn_std
-
-        print(f"{method}: loaded (val_auroc={val_auroc:.4f})")
-        print(f"  mean attn std: {attn_std.mean():.6f}, max attn std: {attn_std.max():.6f}")
+        if method == 'ABMIL':
+            # Deterministic, no uncertainty
+            attn = get_deterministic_attention(model, X, lengths)
+            attentions[method] = attn[start:start + length]
+            print(f"{method}: loaded (val_auroc={val_auroc:.4f})")
+        else:
+            # MC samples for uncertainty
+            attn_samples = get_attention_with_uncertainty(model, X, lengths, args.mc_samples)
+            scan_attn = attn_samples[:, start:start + length]
+            attn_mean = scan_attn.mean(axis=0)
+            attn_std = scan_attn.std(axis=0)
+            attentions[method] = attn_mean
+            uncertainties[method] = attn_std
+            print(f"{method}: loaded (val_auroc={val_auroc:.4f})")
+            print(f"  mean attn std: {attn_std.mean():.6f}, max attn std: {attn_std.max():.6f}")
 
     if not attentions:
         print("No models found. Exiting.")
