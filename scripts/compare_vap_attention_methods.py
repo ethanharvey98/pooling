@@ -238,12 +238,6 @@ def plot_grid_with_uncertainty(attentions, uncertainties, labels, scan_id, ct_sl
     n_methods = len(attentions) + 1  # +1 for ground truth row
     sample_idx = np.linspace(0, len(labels) - 1, 10, dtype=int)
 
-    fig, axes = plt.subplots(n_methods * 2 - 1, 10, figsize=(15, 1.5 * (n_methods * 2 - 1)),
-                             gridspec_kw={'height_ratios': [2] + [2, 1] * (n_methods - 1) + [2]})
-    # Simpler approach: just use n_methods rows, uncertainty as bar thickness
-    plt.close()
-
-    # Simpler grid: one row per method + ground truth
     fig, axes = plt.subplots(n_methods, 10, figsize=(15, 2 * n_methods))
     if n_methods == 1:
         axes = axes[np.newaxis, :]
