@@ -47,9 +47,11 @@ class PoolClf(torch.nn.Module):
         return out, attn_weights
     
 class VAPGaussianMIL(torch.nn.Module):
-    def __init__(self, in_features, out_features=1, hidden_dim=128):
+    def __init__(self, in_features, out_features=1, hidden_dim=128,
+                 prior='standard', prior_scale=1.0):
         super().__init__()
-        self.pool = layers.VAPGaussianAttention(in_features, hidden_dim)
+        self.pool = layers.VAPGaussianAttention(in_features, hidden_dim,
+                                                prior=prior, prior_scale=prior_scale)
         self.clf = torch.nn.Linear(in_features, out_features)
 
     def forward(self, x, lengths):

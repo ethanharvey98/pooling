@@ -338,6 +338,8 @@ class VAPGaussianAttention(torch.nn.Module):
         self,
         in_features: int,
         hidden_dim: int = 128,
+        prior: str = 'standard',
+        prior_scale: float = 1.0,
     ):
         super().__init__()
         self.mlp = torch.nn.Sequential(
@@ -345,11 +347,26 @@ class VAPGaussianAttention(torch.nn.Module):
             torch.nn.Tanh(),
             torch.nn.Linear(in_features=hidden_dim, out_features=2),
         )
+        assert prior in ('standard', 'center')
+        self.prior = prior
+        self.prior_scale = prior_scale
         self.deterministic = False
         self.kl_loss = torch.tensor(0.0)
         self._mu = None
         self._log_sigma = None
         self._last_attn_weights = None
+
+    def _get_prior_mu(self, length: int, device: torch.device) -> torch.Tensor:
+        """Get per-instance prior mean. Shape: (length, 1)."""
+        if self.prior == 'standard':
+            return torch.zeros(length, 1, device=device)
+        elif self.prior == 'center':
+            # Gaussian curve centered at middle, so center slices have higher prior mean
+            positions = torch.arange(length, device=device, dtype=torch.float32)
+            center = (length - 1) / 2.0
+            sigma = length / 4.0  # width scales with bag size
+            prior_mu = self.prior_scale * torch.exp(-0.5 * ((positions - center) / sigma) ** 2)
+            return prior_mu.unsqueeze(1)
 
     def forward(
         self,
@@ -379,8 +396,10 @@ class VAPGaussianAttention(torch.nn.Module):
             h = torch.sum(attn_w * x_i, dim=0, keepdim=True)
             outs.append(h)
             attn_weights_list.append(attn_w)
-            # KL[N(mu,sigma) || N(0,1)] = 0.5 * sum(mu^2 + sigma^2 - 1 - log(sigma^2))
-            kl = 0.5 * (mu_i ** 2 + sigma_i ** 2 - 1 - 2 * log_sigma_i)
+            # KL[N(mu_q, sigma_q) || N(mu_p, 1)]
+            # = 0.5 * ((mu_q - mu_p)^2 + sigma_q^2 - 1 - log(sigma_q^2))
+            prior_mu = self._get_prior_mu(len(mu_i), mu_i.device)
+            kl = 0.5 * ((mu_i - prior_mu) ** 2 + sigma_i ** 2 - 1 - 2 * log_sigma_i)
             kl_sum = kl_sum + kl.sum()
             kl_count += mu_i.numel()
 

@@ -29,7 +29,9 @@ if __name__=="__main__":
     parser.add_argument("--tau_start", default=1.0, help="Initial temperature (default: 1.0)", type=float)
     parser.add_argument("--tau_min", default=0.1, help="Minimum temperature (default: 0.1)", type=float)
     parser.add_argument("--anneal_rate", default=0.95, help="Tau decay rate per epoch (default: 0.95)", type=float)
-    parser.add_argument("--prior_scale", default=1.0, help="Laplace prior scale for VAPGaussianSparse (default: 1.0)", type=float)
+    parser.add_argument("--prior", default="standard", help="Prior type for VAPGaussian: 'standard' or 'center' (default: 'standard')", type=str,
+                        choices=["standard", "center"])
+    parser.add_argument("--prior_scale", default=1.0, help="Prior scale (default: 1.0)", type=float)
     parser.add_argument("--mc_samples", default=10, help="Monte Carlo samples for uncertainty (default: 10)", type=int)
     args = parser.parse_args()
 
@@ -53,7 +55,8 @@ if __name__=="__main__":
     in_features = train_data["X"].shape[1]
 
     if args.model_type == "VAPGaussian":
-        model = models.VAPGaussianMIL(in_features=in_features, out_features=1)
+        model = models.VAPGaussianMIL(in_features=in_features, out_features=1,
+                                       prior=args.prior, prior_scale=args.prior_scale)
     elif args.model_type == "VAPBernoulli":
         model = models.VAPBernoulliMIL(
             in_features=in_features, out_features=1,
