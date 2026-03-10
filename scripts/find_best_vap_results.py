@@ -85,30 +85,79 @@ def load_test_data(dataset_dir, seed):
 
 
 def evaluate_with_uncertainty(model, X, lengths, y, mc_samples, filter_pct):
-    """Run MC inference, compute bag-level AUROC on all and filtered (certain) scans."""
+    """Run MC inference with three uncertainty strategies."""
     unc = model.predict_with_uncertainty(X, lengths, n_samples=mc_samples)
     logits_mean = unc['logits_mean'].squeeze().numpy()
     logits_var = unc['logits_var'].squeeze().numpy()
+    attn_samples = unc['attn_samples']  # (mc_samples, N_total, 1)
     probs = 1.0 / (1.0 + np.exp(-logits_mean))
     labels = y.squeeze().numpy()
 
-    # All scans
+    # All scans (baseline)
     auroc_all = roc_auc_score(labels, probs)
 
     # Filter out top filter_pct most uncertain
     threshold = np.percentile(logits_var, (1 - filter_pct) * 100)
     keep = logits_var <= threshold
-
     if len(np.unique(labels[keep])) > 1:
         auroc_filtered = roc_auc_score(labels[keep], probs[keep])
     else:
         auroc_filtered = float('nan')
 
+    # Strategy 1: Mean-pool uncertain bags
+    # For uncertain bags, re-pool with uniform weights and re-classify
+    uncertain_mask = logits_var > threshold
+    probs_meanpool = probs.copy()
+    clf_weight = model.clf.weight.detach()
+    clf_bias = model.clf.bias.detach()
+    start = 0
+    for i, length in enumerate(lengths):
+        if uncertain_mask[i]:
+            x_bag = X[start:start + length]
+            # Mean pool instead of attention pool
+            pooled = x_bag.mean(dim=0, keepdim=True)
+            logit = (pooled @ clf_weight.T + clf_bias).item()
+            probs_meanpool[i] = 1.0 / (1.0 + np.exp(-logit))
+        start += length
+    auroc_meanpool = roc_auc_score(labels, probs_meanpool)
+
+    # Strategy 2: Zero out most uncertain instances within each bag
+    # Per-instance attention variance across MC samples
+    attn_var = attn_samples.var(dim=0).squeeze().numpy()  # (N_total,)
+    probs_zeroed = np.zeros(len(labels))
+    start = 0
+    for i, length in enumerate(lengths):
+        x_bag = X[start:start + length]
+        inst_var = attn_var[start:start + length]
+
+        # Zero out top filter_pct most uncertain instances in this bag
+        n_zero = max(1, int(length * filter_pct))
+        zero_idx = np.argsort(inst_var)[-n_zero:]  # highest variance instances
+        # Get mean attention across MC samples
+        mean_attn = attn_samples[:, start:start + length, 0].mean(dim=0).numpy()
+        mean_attn[zero_idx] = 0.0
+        attn_sum = mean_attn.sum()
+        if attn_sum > 0:
+            mean_attn = mean_attn / attn_sum
+        else:
+            mean_attn = np.ones(length) / length
+
+        # Re-pool with modified attention
+        pooled = torch.from_numpy(mean_attn).unsqueeze(1).float() * x_bag
+        pooled = pooled.sum(dim=0, keepdim=True)
+        logit = (pooled @ clf_weight.T + clf_bias).item()
+        probs_zeroed[i] = 1.0 / (1.0 + np.exp(-logit))
+        start += length
+    auroc_zeroed = roc_auc_score(labels, probs_zeroed)
+
     return {
         'auroc_all': auroc_all,
         'auroc_filtered': auroc_filtered,
+        'auroc_meanpool': auroc_meanpool,
+        'auroc_zeroed': auroc_zeroed,
         'n_total': len(labels),
         'n_kept': int(keep.sum()),
+        'n_uncertain': int(uncertain_mask.sum()),
         'var_mean': float(logits_var.mean()),
         'var_threshold': float(threshold),
     }
@@ -149,6 +198,8 @@ def main():
 
         test_aurocs = []
         filtered_aurocs = []
+        meanpool_aurocs = []
+        zeroed_aurocs = []
 
         for seed in SEEDS:
             seed_files = [f for f in csv_files
@@ -175,10 +226,16 @@ def main():
                 unc_result = evaluate_with_uncertainty(model, X, lengths, y,
                                                        args.mc_samples, args.filter_pct)
                 filtered_aurocs.append(unc_result['auroc_filtered'])
-                print(f"           MC AUROC (all):      {unc_result['auroc_all']:.4f}")
-                print(f"           MC AUROC (filtered):  {unc_result['auroc_filtered']:.4f}  "
-                      f"(kept {unc_result['n_kept']}/{unc_result['n_total']}, "
-                      f"var_threshold={unc_result['var_threshold']:.4f})")
+                meanpool_aurocs.append(unc_result['auroc_meanpool'])
+                zeroed_aurocs.append(unc_result['auroc_zeroed'])
+                pct = args.filter_pct * 100
+                print(f"           AUROC (all):              {unc_result['auroc_all']:.4f}")
+                print(f"           AUROC (drop uncertain):   {unc_result['auroc_filtered']:.4f}  "
+                      f"(kept {unc_result['n_kept']}/{unc_result['n_total']})")
+                print(f"           AUROC (meanpool uncertain):{unc_result['auroc_meanpool']:.4f}  "
+                      f"(meanpool {unc_result['n_uncertain']} bags)")
+                print(f"           AUROC (zero uncertain inst):{unc_result['auroc_zeroed']:.4f}  "
+                      f"(zeroed top {pct:.0f}% inst per bag)")
 
         if test_aurocs:
             mean = np.mean(test_aurocs)
@@ -186,9 +243,9 @@ def main():
             print(f"\n  >> {model_type}: {mean:.4f} +/- {std:.4f}  (n={len(test_aurocs)})")
 
         if filtered_aurocs:
-            fmean = np.mean(filtered_aurocs)
-            fstd = np.std(filtered_aurocs)
-            print(f"  >> {model_type} (filtered): {fmean:.4f} +/- {fstd:.4f}  (n={len(filtered_aurocs)})")
+            print(f"  >> drop uncertain bags:    {np.mean(filtered_aurocs):.4f} +/- {np.std(filtered_aurocs):.4f}")
+            print(f"  >> meanpool uncertain bags:{np.mean(meanpool_aurocs):.4f} +/- {np.std(meanpool_aurocs):.4f}")
+            print(f"  >> zero uncertain inst:    {np.mean(zeroed_aurocs):.4f} +/- {np.std(zeroed_aurocs):.4f}")
 
         print()
 
