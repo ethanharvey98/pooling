@@ -32,6 +32,9 @@ if __name__=="__main__":
     parser.add_argument("--prior", default="standard", help="Prior type for VAPGaussian: 'standard' or 'center' (default: 'standard')", type=str,
                         choices=["standard", "center"])
     parser.add_argument("--prior_scale", default=1.0, help="Prior scale (default: 1.0)", type=float)
+    parser.add_argument("--adaptive_temp", action="store_true", default=False,
+                        help="Use adaptive softmax temperature from learned sigma (default: False)")
+    parser.add_argument("--adaptive_temp_scale", default=4.0, help="Scale for adaptive temp (default: 4.0)", type=float)
     parser.add_argument("--mc_samples", default=10, help="Monte Carlo samples for uncertainty (default: 10)", type=int)
     args = parser.parse_args()
 
@@ -56,7 +59,9 @@ if __name__=="__main__":
 
     if args.model_type == "VAPGaussian":
         model = models.VAPGaussianMIL(in_features=in_features, out_features=1,
-                                       prior=args.prior, prior_scale=args.prior_scale)
+                                       prior=args.prior, prior_scale=args.prior_scale,
+                                       adaptive_temp=args.adaptive_temp,
+                                       adaptive_temp_scale=args.adaptive_temp_scale)
     elif args.model_type == "VAPBernoulli":
         model = models.VAPBernoulliMIL(
             in_features=in_features, out_features=1,

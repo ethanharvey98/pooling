@@ -340,6 +340,8 @@ class VAPGaussianAttention(torch.nn.Module):
         hidden_dim: int = 128,
         prior: str = 'standard',
         prior_scale: float = 1.0,
+        adaptive_temp: bool = False,
+        adaptive_temp_scale: float = 4.0,
     ):
         super().__init__()
         self.mlp = torch.nn.Sequential(
@@ -350,6 +352,8 @@ class VAPGaussianAttention(torch.nn.Module):
         assert prior in ('standard', 'center')
         self.prior = prior
         self.prior_scale = prior_scale
+        self.adaptive_temp = adaptive_temp
+        self.adaptive_temp_scale = adaptive_temp_scale
         self.deterministic = False
         self.kl_loss = torch.tensor(0.0)
         self._mu = None
@@ -392,7 +396,12 @@ class VAPGaussianAttention(torch.nn.Module):
                 z = mu_i + sigma_i * eps
             else:
                 z = mu_i
-            attn_w = torch.nn.functional.softmax(z, dim=0)
+            # Adaptive temperature: tau = 1 + scale * mean(sigma) per bag
+            if self.adaptive_temp:
+                tau = 1.0 + self.adaptive_temp_scale * sigma_i.mean()
+                attn_w = torch.nn.functional.softmax(z / tau, dim=0)
+            else:
+                attn_w = torch.nn.functional.softmax(z, dim=0)
             h = torch.sum(attn_w * x_i, dim=0, keepdim=True)
             outs.append(h)
             attn_weights_list.append(attn_w)

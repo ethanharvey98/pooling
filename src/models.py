@@ -48,10 +48,13 @@ class PoolClf(torch.nn.Module):
     
 class VAPGaussianMIL(torch.nn.Module):
     def __init__(self, in_features, out_features=1, hidden_dim=128,
-                 prior='standard', prior_scale=1.0):
+                 prior='standard', prior_scale=1.0,
+                 adaptive_temp=False, adaptive_temp_scale=4.0):
         super().__init__()
         self.pool = layers.VAPGaussianAttention(in_features, hidden_dim,
-                                                prior=prior, prior_scale=prior_scale)
+                                                prior=prior, prior_scale=prior_scale,
+                                                adaptive_temp=adaptive_temp,
+                                                adaptive_temp_scale=adaptive_temp_scale)
         self.clf = torch.nn.Linear(in_features, out_features)
 
     def forward(self, x, lengths):
