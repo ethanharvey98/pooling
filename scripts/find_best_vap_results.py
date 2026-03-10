@@ -22,7 +22,7 @@ import models
 
 
 DATASET_DIR = '/cluster/tufts/hugheslab/dloevl01/encoded_RSNA/ViT_B_16'
-MODEL_TYPES = ['VAPGaussian', 'VAPBernoulli', 'VAPGaussianSparse']
+MODEL_TYPES = ['VAPGaussian', 'VAPGaussianCenter', 'VAPBernoulli', 'VAPGaussianSparse']
 SEEDS = [1001, 2001, 3001]
 
 
@@ -66,7 +66,7 @@ def find_best_for_seed(csv_files):
 
 def load_vap_model(model_path, in_features, model_type):
     """Load a VAP model from checkpoint."""
-    if model_type == 'VAPGaussian':
+    if model_type in ('VAPGaussian', 'VAPGaussianCenter'):
         model = models.VAPGaussianMIL(in_features=in_features, out_features=1)
     elif model_type == 'VAPBernoulli':
         model = models.VAPBernoulliMIL(in_features=in_features, out_features=1)
