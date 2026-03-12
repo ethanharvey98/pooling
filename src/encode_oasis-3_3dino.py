@@ -26,14 +26,6 @@ def load_3dino_model(pretrained_weights):
     from dinov2.models import build_model_from_cfg
     import dinov2.utils.utils as dinov2_utils
 
-    # Patch for Python <3.9 which lacks str.removesuffix
-    if not hasattr(str, 'removesuffix'):
-        def _removesuffix(self, suffix):
-            if suffix and self.endswith(suffix):
-                return self[:-len(suffix)]
-            return self
-        str.removesuffix = _removesuffix
-
     cfg = load_and_merge_config_3d('train/vit3d_highres')
     model, _ = build_model_from_cfg(cfg, only_teacher=True)
     dinov2_utils.load_pretrained_weights(model, pretrained_weights, "teacher")
