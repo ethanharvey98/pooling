@@ -1,0 +1,240 @@
+# =============================================================================
+# Dataset Registry — HPC paths for all datasets used in the pooling project
+#
+# Owner paths:
+#   eharve06  = /cluster/tufts/hugheslab/eharve06
+#   dloevl01  = /cluster/tufts/hugheslab/dloevl01
+#   shared    = /cluster/tufts/hugheslab/datasets
+#   kpsc      = /cluster/tufts/hugheslabkp/data_irb_required
+# =============================================================================
+
+oasis3_mri:
+  description: >
+    OASIS-3 MRI dataset. Longitudinal brain MRI scans (T1w, T2w) from the
+    Open Access Series of Imaging Studies. Preprocessed with N4 bias
+    correction, ANTs registration to MNI template, and cropping.
+    Label: Alzheimer's (binary, based on CDR within temporal window).
+  modality: MRI
+  task: Alzheimer's classification (binary)
+  label_column: "Alzheimer's"
+  split_strategy: subject-level stratified (4/6 train, 1/6 val, 1/6 test)
+  seeds: [1001, 2001, 3001]
+
+  raw_nifti: /cluster/tufts/hugheslab/datasets/OASIS-3_MRI
+  numpy_dir: /cluster/tufts/hugheslab/datasets/OASIS-3_MRI_numpy
+  labels_csv: /cluster/tufts/hugheslab/datasets/OASIS-3_MRI_numpy/labels.csv
+  numpy_format: "{MR_ID}.npz"
+  numpy_shape_notes: "(H, W, D, C) where C = number of scan types (T1w, T2w)"
+
+  encoded:
+    ViT_B_16:
+      path: /cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_MRI/ViT_B_16/seed={seed}
+      embed_dim: 768
+    ConvNeXt_Tiny:
+      path: /cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_MRI/ConvNeXt_Tiny/seed={seed}
+      embed_dim: 768
+    MedSAM:
+      path: /cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_MRI/MedSAM/seed={seed}
+      embed_dim: 256
+    3DINO_ViT:
+      path: /cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_MRI/3DINO_ViT/seed={seed}
+      embed_dim: 1024
+      notes: "3D encoder — single embedding per volume (lengths all 1)"
+
+  preprocess_script: src/preprocess_oasis-3_mri.py
+  encode_script: src/encode_oasis-3.py
+  encode_3dino_script: src/encode_oasis-3_3dino.py
+  train_script: src/oasis-3.py
+
+
+oasis3_ct:
+  description: >
+    OASIS-3 CT dataset. Head CT scans from the Open Access Series of
+    Imaging Studies. Preprocessed with skull stripping (intensity window
+    [-100, 300] HU).
+    Label: Alzheimer's (binary, based on CDR within temporal window).
+  modality: CT
+  task: Alzheimer's classification (binary)
+  label_column: "Alzheimer's"
+  split_strategy: subject-level stratified (4/6 train, 1/6 val, 1/6 test)
+  seeds: [1001, 2001, 3001]
+
+  raw_nifti: /cluster/tufts/hugheslab/datasets/OASIS-3_CT
+  numpy_dir: /cluster/tufts/hugheslab/datasets/OASIS-3_CT_numpy
+  labels_csv: /cluster/tufts/hugheslab/datasets/OASIS-3_CT_numpy/labels.csv
+  numpy_format: "{XNAT_CTSESSIONDATA_ID}.npz"
+
+  encoded:
+    ViT_B_16:
+      path: /cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_CT/ViT_B_16/seed={seed}
+      embed_dim: 768
+    ConvNeXt_Tiny:
+      path: /cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_CT/ConvNeXt_Tiny/seed={seed}
+      embed_dim: 768
+    MedSAM:
+      path: /cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_CT/MedSAM/seed={seed}
+      embed_dim: 256
+
+  preprocess_script: src/preprocess_oasis-3_ct.py
+  encode_script: src/encode_oasis-3.py
+  train_script: src/oasis-3.py
+
+
+rsna_full:
+  description: >
+    Full RSNA Intracranial Hemorrhage Detection dataset (~21,744 CT head
+    scans). DICOMs preprocessed with skull stripping and stacked into 3D
+    volumes. Scan-level label: 1 if ANY slice has hemorrhage.
+    labels.csv contains per-scan info with ordered slice paths and
+    multi-class hemorrhage labels (epidural, intraparenchymal,
+    intraventricular, subarachnoid, subdural).
+  modality: CT
+  task: Intracranial hemorrhage detection (binary scan-level)
+  label_column: scan_label (derived from "Any" column in labels.csv)
+  split_strategy: scan-level stratified (4/6 train, 1/6 val, 1/6 test)
+  seeds: [1001, 2001, 3001]
+
+  raw_dicom: /cluster/tufts/hugheslab/datasets/RSNA/stage_2_train
+  numpy_dir: /cluster/tufts/hugheslab/datasets/RSNA_numpy
+  labels_csv: /cluster/tufts/hugheslab/datasets/RSNA/labels.csv
+  other_csvs:
+    meta_data: /cluster/tufts/hugheslab/datasets/RSNA/meta_data.csv
+    stage_2_train: /cluster/tufts/hugheslab/datasets/RSNA/stage_2_train.csv
+    splits: /cluster/tufts/hugheslab/datasets/RSNA/splits.csv
+  numpy_format: "{Study_ID}.npz"
+  numpy_shape_notes: "(1, H, W, S) — single-channel volume with S slices"
+
+  encoded:
+    ViT_B_16:
+      path: /cluster/tufts/hugheslab/dloevl01/encoded_RSNA/ViT_B_16/seed={seed}
+      embed_dim: 768
+
+  preprocess_script: src/preprocess_rsna_full.py  # on rsna-ich branch
+  encode_script: src/encode_rsna_full.py          # on rsna-ich branch
+  train_script: src/oasis-3.py
+  notes: "Scripts live on the rsna-ich branch"
+
+
+rsna_1149:
+  description: >
+    Curated subset of 1,149 RSNA ICH scans with manually verified slice
+    ordering and labels. The subset CSV lives in the notebooks/ directory
+    (on rsna-ich branch) and also at ~/RSNA_Investigation/ on HPC.
+    DICOMs preprocessed similarly to rsna_full but stored in a separate
+    numpy directory.
+  modality: CT
+  task: Intracranial hemorrhage detection (binary scan-level)
+  label_column: scan_label
+  split_strategy: scan-level stratified (4/6 train, 1/6 val, 1/6 test)
+  seeds: [1001, 2001, 3001]
+
+  raw_dicom: /cluster/tufts/hugheslab/datasets/RSNA/stage_2_train  # same DICOMs as full
+  numpy_dir: /cluster/tufts/hugheslab/dloevl01/datasets/RSNA/RSNA_ICH_numpy
+  labels_csv: /home/denny-loevlie/RSNA_Investigation/rsna_ich_subset_1149_complete.csv
+  labels_csv_alt: notebooks/rsna_ich_subset_1149_complete.csv  # on rsna-ich branch
+  numpy_format: "{scan_id}.npz"
+  numpy_shape_notes: "(num_slices, H, W) — no channel dim, slices stacked on axis 0"
+
+  encoded:
+    ViT_B_16:
+      path: /cluster/tufts/hugheslab/dloevl01/encoded_RSNA_ICH/ViT_B_16/seed={seed}
+      embed_dim: 768
+
+  preprocess_script: src/preprocess_rsna.py   # on rsna-ich branch
+  encode_script: src/encode_rsna.py           # on rsna-ich branch
+  train_script: src/oasis-3.py
+  notes: "Scripts live on the rsna-ich branch. Numpy shape differs from rsna_full."
+
+
+adni1:
+  description: >
+    ADNI1 Complete 1-Year 1.5T MRI dataset. Brain MRI scans from the
+    Alzheimer's Disease Neuroimaging Initiative. Preprocessed with bias
+    correction, ANTs registration to MNI template, and cropping.
+    Label: Alzheimer's (binary, based on diagnosis group).
+  modality: MRI
+  task: Alzheimer's classification (binary)
+  label_column: "Alzheimer's"
+  split_strategy: subject-level stratified (4/6 train, 1/6 val, 1/6 test)
+  seeds: [1001, 2001, 3001]
+
+  raw_data: /cluster/tufts/hugheslab/datasets/ADNI1_Complete_1Yr_1.5T
+  raw_csv: /cluster/tufts/hugheslab/datasets/ADNI1_Complete_1Yr_1.5T/ADNI1_Complete_1Yr_1.5T.csv
+  numpy_dir: /cluster/tufts/hugheslab/datasets/ADNI1_Complete_1Yr_1.5T_numpy
+  labels_csv: /cluster/tufts/hugheslab/datasets/ADNI1_Complete_1Yr_1.5T_numpy/labels.csv
+  numpy_format: "{Subject}__{Image_Data_ID}.npz"
+
+  encoded:
+    ViT_B_16:
+      path: /cluster/tufts/hugheslab/eharve06/encoded_ADNI1_Complete_1Yr_1.5T/ViT_B_16/seed={seed}
+      embed_dim: 768
+    ConvNeXt_Tiny:
+      path: /cluster/tufts/hugheslab/eharve06/encoded_ADNI1_Complete_1Yr_1.5T/ConvNeXt_Tiny/seed={seed}
+      embed_dim: 768
+    MedSAM:
+      path: /cluster/tufts/hugheslab/eharve06/encoded_ADNI1_Complete_1Yr_1.5T/MedSAM/seed={seed}
+      embed_dim: 256
+
+  preprocess_script: src/preprocess_adni1_mri.py
+  encode_script: src/encode_adni1.py
+  train_script: src/oasis-3.py
+
+
+kpsc_mri:
+  description: >
+    Kaiser Permanente Southern California (KPSC) MRI dataset. 800 brain
+    MRI scans (T1w + T2w) from 11 sites. DICOMs converted to NIfTI,
+    then preprocessed and stored as numpy. Multi-output labels: idCBI
+    (intracranial brain injury) and idWMD (white matter disease).
+    Splits are by site ID (not random) for cross-site generalization.
+  modality: MRI
+  task: Multi-output classification (idCBI, idWMD)
+  label_columns: [idCBI, idWMD]
+  split_strategy: site-based (varying test/train/val site combinations)
+  site_ids: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+  notes: "IRB-required data — stored under hugheslabkp"
+
+  raw_dicom: /cluster/home/eharve06/hugheslabkp/data_irb_required/ADDF_2024_External_MRimage_800
+  raw_csv: /cluster/home/eharve06/hugheslabkp/data_irb_required/ADDF_2024_External_MRimage_800/ADDF_2024_External_MRimage_800.csv
+  nifti_dir: /cluster/tufts/hugheslabkp/data_irb_required/KPSC_MRI_800_nifti
+  numpy_dir: /cluster/tufts/hugheslabkp/data_irb_required/KPSC_MRI_800_numpy
+  labels_csv: /cluster/tufts/hugheslabkp/data_irb_required/KPSC_MRI_800_numpy/labels.csv
+  numpy_format: "{STUDY_ID}.npz"
+  numpy_shape_notes: "T1 and T2 stacked as channels"
+
+  encoded:
+    ViT_B_16:
+      path: /cluster/tufts/hugheslabkp/data_irb_required/encoded_KPSC_MRI_800/ViT_B_16/{split_spec}
+      embed_dim: 768
+      split_spec_example: "test_site_ids=9_train_site_ids=1_2_3_4_6_7_8_10_11_val_site_ids=5"
+    ConvNeXt_Tiny:
+      path: /cluster/tufts/hugheslabkp/data_irb_required/encoded_KPSC_MRI_800/ConvNeXt_Tiny/{split_spec}
+      embed_dim: 768
+    MedSAM:
+      path: /cluster/tufts/hugheslabkp/data_irb_required/encoded_KPSC_MRI_800/MedSAM/{split_spec}
+      embed_dim: 256
+
+  convert_script: src/convert_kpsc_mri.py
+  preprocess_script: src/preprocess_kpsc_mri.py
+  encode_script: src/encode_kpsc.py
+  train_script: src/kpsc.py
+
+
+kpsc_ct:
+  description: >
+    No KPSC CT dataset is currently implemented in this codebase.
+    Only KPSC MRI (800 samples) exists.
+  status: not_implemented
+
+
+# =============================================================================
+# Shared resources
+# =============================================================================
+shared:
+  medsam_checkpoint: /cluster/tufts/hugheslab/eharve06/pooling/models/medsam_vit_b.pth
+  3dino_weights:
+    huggingface_repo: AICONSlab/3DINO-ViT
+    huggingface_file: 3dino_vit_weights.pth
+    notes: "Gated model — requires HF login with accepted license"
+  mni_template: scripts/mni_icbm152_t1_tal_nlin_sym_09c.nii
+  ref_cropped_template: scripts/ref_cropped_template.nii.gz
