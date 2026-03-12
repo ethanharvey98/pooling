@@ -130,8 +130,7 @@ rsna_1149:
 
   raw_dicom: /cluster/tufts/hugheslab/datasets/RSNA/stage_2_train  # same DICOMs as full
   numpy_dir: /cluster/tufts/hugheslab/dloevl01/datasets/RSNA/RSNA_ICH_numpy
-  labels_csv: /home/denny-loevlie/RSNA_Investigation/rsna_ich_subset_1149_complete.csv
-  labels_csv_alt: notebooks/rsna_ich_subset_1149_complete.csv  # on rsna-ich branch
+  labels_csv: notebooks/rsna_ich_subset_1149_complete.csv  # on rsna-ich branch
   numpy_format: "{scan_id}.npz"
   numpy_shape_notes: "(num_slices, H, W) — no channel dim, slices stacked on axis 0"
 
@@ -194,8 +193,8 @@ kpsc_mri:
   site_ids: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
   notes: "IRB-required data — stored under hugheslabkp"
 
-  raw_dicom: /cluster/home/eharve06/hugheslabkp/data_irb_required/ADDF_2024_External_MRimage_800
-  raw_csv: /cluster/home/eharve06/hugheslabkp/data_irb_required/ADDF_2024_External_MRimage_800/ADDF_2024_External_MRimage_800.csv
+  raw_dicom: /cluster/tufts/hugheslabkp/data_irb_required/ADDF_2024_External_MRimage_800
+  raw_csv: /cluster/tufts/hugheslabkp/data_irb_required/ADDF_2024_External_MRimage_800/ADDF_2024_External_MRimage_800.csv
   nifti_dir: /cluster/tufts/hugheslabkp/data_irb_required/KPSC_MRI_800_nifti
   numpy_dir: /cluster/tufts/hugheslabkp/data_irb_required/KPSC_MRI_800_numpy
   labels_csv: /cluster/tufts/hugheslabkp/data_irb_required/KPSC_MRI_800_numpy/labels.csv
