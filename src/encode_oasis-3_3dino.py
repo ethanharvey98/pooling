@@ -11,13 +11,13 @@ import torch.nn.functional as F
 # Add 3DINO to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '3DINO'))
 
-# Using HuggingFace download (auto-downloads and caches weights):
-# python ../src/encode_oasis-3_3dino.py --encoded_dir='/cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_MRI/3DINO_ViT/seed=1001' --numpy_dir='/cluster/tufts/hugheslab/datasets/OASIS-3_MRI_numpy' --hf_download --seed=1001
-# python ../src/encode_oasis-3_3dino.py --encoded_dir='/cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_MRI/3DINO_ViT/seed=2001' --numpy_dir='/cluster/tufts/hugheslab/datasets/OASIS-3_MRI_numpy' --hf_download --seed=2001
-# python ../src/encode_oasis-3_3dino.py --encoded_dir='/cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_MRI/3DINO_ViT/seed=3001' --numpy_dir='/cluster/tufts/hugheslab/datasets/OASIS-3_MRI_numpy' --hf_download --seed=3001
+# 4-block concat + avgpool (as recommended by 3DINO paper):
+# python ../src/encode_oasis-3_3dino.py --encoded_dir='/cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_MRI/3DINO_ViT_concat/seed=1001' --numpy_dir='/cluster/tufts/hugheslab/datasets/OASIS-3_MRI_numpy' --hf_download --seed=1001 --n_last_blocks=4 --avgpool
+# python ../src/encode_oasis-3_3dino.py --encoded_dir='/cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_MRI/3DINO_ViT_concat/seed=2001' --numpy_dir='/cluster/tufts/hugheslab/datasets/OASIS-3_MRI_numpy' --hf_download --seed=2001 --n_last_blocks=4 --avgpool
+# python ../src/encode_oasis-3_3dino.py --encoded_dir='/cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_MRI/3DINO_ViT_concat/seed=3001' --numpy_dir='/cluster/tufts/hugheslab/datasets/OASIS-3_MRI_numpy' --hf_download --seed=3001 --n_last_blocks=4 --avgpool
 #
-# Using local weights:
-# python ../src/encode_oasis-3_3dino.py --encoded_dir='/cluster/.../3DINO_ViT/seed=1001' --numpy_dir='/cluster/.../OASIS-3_MRI_numpy' --pretrained_weights='/path/to/3dino_vit_weights.pth' --seed=1001
+# Single CLS token (original behavior):
+# python ../src/encode_oasis-3_3dino.py --encoded_dir='/cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_MRI/3DINO_ViT/seed=1001' --numpy_dir='/cluster/tufts/hugheslab/datasets/OASIS-3_MRI_numpy' --hf_download --seed=1001
 
 
 def load_3dino_model(pretrained_weights):
@@ -64,7 +64,27 @@ def load_and_resample_volume(path, target_size=(112, 112, 112)):
     return volume
 
 
-def encode_split(model, df, device):
+def create_linear_input(x_tokens_list, use_n_blocks, use_avgpool):
+    """Construct features from intermediate layers (matches 3DINO eval/linear3d.py).
+
+    Concatenates CLS tokens from last N blocks, and optionally appends
+    the mean of patch tokens from the final block.
+    """
+    intermediate_output = x_tokens_list[-use_n_blocks:]
+    output = torch.cat([class_token for _, class_token in intermediate_output], dim=-1)
+    if use_avgpool:
+        output = torch.cat(
+            (
+                output,
+                torch.mean(intermediate_output[-1][0], dim=1),  # patch tokens
+            ),
+            dim=-1,
+        )
+        output = output.reshape(output.shape[0], -1)
+    return output.float()
+
+
+def encode_split(model, df, device, n_last_blocks, avgpool):
     """Encode all volumes in a dataframe split, return X, lengths, y."""
     X, lengths, y = [], [], []
 
@@ -73,7 +93,15 @@ def encode_split(model, df, device):
         volume = volume.to(device)
 
         with torch.no_grad():
-            embedding = model(volume)  # (1, 1024)
+            if n_last_blocks > 1 or avgpool:
+                # Extract intermediate layer features (as in 3DINO paper)
+                features = model.get_intermediate_layers(
+                    volume, n_last_blocks, return_class_token=True
+                )
+                embedding = create_linear_input(features, n_last_blocks, avgpool)
+            else:
+                # Single CLS token from final layer
+                embedding = model(volume)  # (1, 1024)
 
         X.append(embedding.cpu())
         lengths.append(1)
@@ -93,6 +121,8 @@ if __name__ == '__main__':
     parser.add_argument('--pretrained_weights', help='Path to 3DINO pretrained weights', type=str, default=None)
     parser.add_argument('--hf_download', action='store_true', default=False, help='Download weights from HuggingFace (AICONSlab/3DINO-ViT)')
     parser.add_argument('--seed', default=42, help='Random seed (default: 42)', type=int)
+    parser.add_argument('--n_last_blocks', default=1, type=int, help='Number of last transformer blocks to concatenate CLS tokens from (paper uses 4)')
+    parser.add_argument('--avgpool', action='store_true', default=False, help='Append average-pooled patch tokens from final block (paper uses this)')
     args = parser.parse_args()
 
     os.makedirs(args.encoded_dir, exist_ok=True)
@@ -131,12 +161,16 @@ if __name__ == '__main__':
 
     model = load_3dino_model(args.pretrained_weights)
     model.to(device)
-    print(f"3DINO ViT-Large loaded. Embed dim: {model.embed_dim}")
+
+    # Report embedding dimensions
+    embed_dim = model.embed_dim
+    out_dim = embed_dim * args.n_last_blocks + (embed_dim if args.avgpool else 0)
+    print(f"3DINO ViT-Large loaded. n_last_blocks={args.n_last_blocks}, avgpool={args.avgpool}, output_dim={out_dim}")
 
     # --- Encode each split ---
     for split_name, split_df in [('train', train_df), ('val', val_df), ('test', test_df)]:
         print(f"\nEncoding {split_name} split ({len(split_df)} volumes)...")
-        X, lengths, y = encode_split(model, split_df, device)
+        X, lengths, y = encode_split(model, split_df, device, args.n_last_blocks, args.avgpool)
         save_path = f'{args.encoded_dir}/{split_name}.pth'
         torch.save({'X': X, 'lengths': lengths, 'y': y}, save_path)
         print(f"Saved {save_path}: X={X.shape}, y={y.shape}")

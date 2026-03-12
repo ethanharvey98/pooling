@@ -19,6 +19,9 @@ oasis3_mri:
     3DINO_ViT:
       path: /cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_MRI/3DINO_ViT/seed={seed}
       embed_dim: 1024
+    3DINO_ViT_concat:
+      path: /cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_MRI/3DINO_ViT_concat/seed={seed}
+      embed_dim: 5120
 
 oasis3_ct:
   description: "OASIS-3 head CT. Binary Alzheimer's classification."
