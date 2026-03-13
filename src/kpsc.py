@@ -22,6 +22,7 @@ if __name__=='__main__':
     parser.add_argument('--pooling', default='Max', help='Pooling operation (default: \'max\')', type=str)
     parser.add_argument('--save', action='store_true', default=False, help='Whether or not to save the model (default: False)')
     parser.add_argument('--seed', default=42, help='TODO (default: 42)', type=int)
+    parser.add_argument('--label_index', default=0, help='Label column index: 0=idCBI, 1=idWMD (default: 0)', type=int)
     parser.add_argument('--weight_decay', default=0.0, help='Weight decay (default: 0.0)', type=float)
     args = parser.parse_args()
     
@@ -33,9 +34,9 @@ if __name__=='__main__':
     val_data = torch.load(f'{args.dataset_dir}/val.pth', map_location=torch.device('cpu'), weights_only=False)
     test_data = torch.load(f'{args.dataset_dir}/test.pth', map_location=torch.device('cpu'), weights_only=False)
     
-    train_dataset = datasets.MILTensorDataset(train_data['X'], train_data['lengths'], train_data['y'][:,0][:,None])
-    val_dataset = datasets.MILTensorDataset(val_data['X'], val_data['lengths'], val_data['y'][:,0][:,None])
-    test_dataset = datasets.MILTensorDataset(test_data['X'], test_data['lengths'], test_data['y'][:,0][:,None])
+    train_dataset = datasets.MILTensorDataset(train_data['X'], train_data['lengths'], train_data['y'][:,args.label_index][:,None])
+    val_dataset = datasets.MILTensorDataset(val_data['X'], val_data['lengths'], val_data['y'][:,args.label_index][:,None])
+    test_dataset = datasets.MILTensorDataset(test_data['X'], test_data['lengths'], test_data['y'][:,args.label_index][:,None])
     
     shuffled_train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=utils.collate_fn, drop_last=True)
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, collate_fn=utils.collate_fn)
