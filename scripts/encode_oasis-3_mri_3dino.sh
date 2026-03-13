@@ -18,7 +18,7 @@ seed=${seeds[$SLURM_ARRAY_TASK_ID]}
 WEIGHTS="/cluster/tufts/hugheslab/dloevl01/DINO3_Experiments/pooling/envs/dino3/3dino_vit_weights.pth"
 
 python ../src/encode_oasis-3_3dino.py \
-    --encoded_dir="/cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_MRI/3DINO_ViT_concat/seed=${seed}" \
+    --encoded_dir="/cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_MRI/3DINO_ViT_concat_T1T2/seed=${seed}" \
     --numpy_dir='/cluster/tufts/hugheslab/datasets/OASIS-3_MRI_numpy' \
     --pretrained_weights="${WEIGHTS}" \
     --seed=${seed} \

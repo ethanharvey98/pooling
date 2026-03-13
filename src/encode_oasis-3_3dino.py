@@ -45,23 +45,26 @@ def normalize_volume(volume):
 def load_and_resample_volume(path, target_size=(112, 112, 112)):
     """Load .npz file as 3D volume and resample to target size.
 
-    The existing .npz files contain arrays of shape (H, W, D) or (H, W, D, C).
-    We take the first channel if multi-channel, resample to 112^3, and return
-    shape (1, 1, 112, 112, 112).
+    Returns a list of volumes, one per channel. For single-channel data,
+    returns a list with one element. For multi-channel (e.g., T1w+T2w),
+    returns one (1, 1, 112, 112, 112) volume per channel.
     """
     data = np.load(path)
-    arr = data['arr_0']  # (H, W, D) or (H, W, D, C)
+    arr = data['arr_0']  # (C, H, W, D) or (H, W, D)
 
     if arr.ndim == 4:
-        # Multi-channel: take first channel (e.g., T1w)
-        arr = arr[..., 0]
+        channels = [arr[c] for c in range(arr.shape[0])]
+    else:
+        channels = [arr]
 
-    volume = torch.as_tensor(arr, dtype=torch.float32)
-    # (H, W, D) -> (1, 1, H, W, D) for interpolate
-    volume = volume.unsqueeze(0).unsqueeze(0)
-    volume = F.interpolate(volume, size=target_size, mode='trilinear', align_corners=False)
-    volume = normalize_volume(volume)
-    return volume
+    volumes = []
+    for ch in channels:
+        volume = torch.as_tensor(ch, dtype=torch.float32)
+        volume = volume.unsqueeze(0).unsqueeze(0)  # (1, 1, H, W, D)
+        volume = F.interpolate(volume, size=target_size, mode='trilinear', align_corners=False)
+        volume = normalize_volume(volume)
+        volumes.append(volume)
+    return volumes
 
 
 def create_linear_input(x_tokens_list, use_n_blocks, use_avgpool):
@@ -84,24 +87,37 @@ def create_linear_input(x_tokens_list, use_n_blocks, use_avgpool):
     return output.float()
 
 
+def encode_volume(model, volume, device, n_last_blocks, avgpool):
+    """Encode a single (1, 1, D, H, W) volume and return its embedding."""
+    volume = volume.to(device)
+    with torch.no_grad():
+        if n_last_blocks > 1 or avgpool:
+            features = model.get_intermediate_layers(
+                volume, n_last_blocks, return_class_token=True
+            )
+            return create_linear_input(features, n_last_blocks, avgpool)
+        else:
+            return model(volume)
+
+
 def encode_split(model, df, device, n_last_blocks, avgpool):
-    """Encode all volumes in a dataframe split, return X, lengths, y."""
+    """Encode all volumes in a dataframe split, return X, lengths, y.
+
+    For multi-channel volumes (e.g., T1w+T2w), each channel is encoded
+    separately and the embeddings are concatenated.
+    """
     X, lengths, y = [], [], []
 
     for i, row in df.iterrows():
-        volume = load_and_resample_volume(row['path'])  # (1, 1, 112, 112, 112)
-        volume = volume.to(device)
+        volumes = load_and_resample_volume(row['path'])
 
-        with torch.no_grad():
-            if n_last_blocks > 1 or avgpool:
-                # Extract intermediate layer features (as in 3DINO paper)
-                features = model.get_intermediate_layers(
-                    volume, n_last_blocks, return_class_token=True
-                )
-                embedding = create_linear_input(features, n_last_blocks, avgpool)
-            else:
-                # Single CLS token from final layer
-                embedding = model(volume)  # (1, 1024)
+        channel_embeddings = []
+        for volume in volumes:
+            emb = encode_volume(model, volume, device, n_last_blocks, avgpool)
+            channel_embeddings.append(emb)
+
+        # Concatenate embeddings from all channels: (1, dim*n_channels)
+        embedding = torch.cat(channel_embeddings, dim=-1)
 
         X.append(embedding.cpu())
         lengths.append(1)
@@ -162,10 +178,9 @@ if __name__ == '__main__':
     model = load_3dino_model(args.pretrained_weights)
     model.to(device)
 
-    # Report embedding dimensions
     embed_dim = model.embed_dim
-    out_dim = embed_dim * args.n_last_blocks + (embed_dim if args.avgpool else 0)
-    print(f"3DINO ViT-Large loaded. n_last_blocks={args.n_last_blocks}, avgpool={args.avgpool}, output_dim={out_dim}")
+    per_channel_dim = embed_dim * args.n_last_blocks + (embed_dim if args.avgpool else 0)
+    print(f"3DINO ViT-Large loaded. n_last_blocks={args.n_last_blocks}, avgpool={args.avgpool}, per_channel_dim={per_channel_dim}")
 
     # --- Encode each split ---
     for split_name, split_df in [('train', train_df), ('val', val_df), ('test', test_df)]:
