@@ -28,6 +28,7 @@ if __name__=="__main__":
     parser.add_argument("--pi_max", default=0.5, help="VAP center prior peak (default: 0.5)", type=float)
     parser.add_argument("--sigma", default=0.25, help="VAP center prior width (default: 0.25)", type=float)
     parser.add_argument("--tau", default=0.5, help="VAP Gumbel-Sigmoid temperature (default: 0.5)", type=float)
+    parser.add_argument("--gamma", default=0.0, help="Max-instance auxiliary loss weight (default: 0.0)", type=float)
     args = parser.parse_args()
     
     torch.manual_seed(args.seed)
@@ -67,6 +68,8 @@ if __name__=="__main__":
 
     if args.pooling == 'BernoulliVAP':
         criterion = losses.VAPLoss(criterion, beta=args.beta, vap_layer=model.pool)
+    elif args.pooling == 'ABMILMaxInst':
+        criterion = losses.MaxInstanceLoss(criterion, gamma=args.gamma, pool_layer=model.pool)
 
     optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.weight_decay, momentum=0.9)
     

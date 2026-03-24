@@ -71,7 +71,43 @@ class ABMIL(torch.nn.Module):
             for out_i in torch.split(out, lengths)
         ])
         return out, attn_weights
-        
+
+class ABMILMaxInst(torch.nn.Module):
+    def __init__(
+        self,
+        in_features: int,
+        hidden_dim: int = 128,
+    ):
+        super().__init__()
+        self.mlp = torch.nn.Sequential(
+            torch.nn.Linear(in_features=in_features, out_features=hidden_dim),
+            torch.nn.Tanh(),
+            torch.nn.Linear(in_features=hidden_dim, out_features=1),
+        )
+        self.max_logits = None
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        lengths: Tuple[int, ...],
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        attn_logits = self.mlp(x)
+        attn_weights = torch.cat([
+            torch.nn.functional.softmax(attn_logits_i, dim=0)
+            for attn_logits_i in torch.split(attn_logits, lengths)
+        ])
+        out = attn_weights * x
+        out = torch.cat([
+            torch.sum(out_i, dim=0, keepdim=True)
+            for out_i in torch.split(out, lengths)
+        ])
+        # Max attention logit per bag for auxiliary instance-level loss
+        self.max_logits = torch.stack([
+            attn_logits_i.max()
+            for attn_logits_i in torch.split(attn_logits, lengths)
+        ]).unsqueeze(-1)
+        return out, attn_weights
+
 class BernoulliVAP(torch.nn.Module):
     def __init__(
         self,

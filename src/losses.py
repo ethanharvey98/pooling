@@ -148,3 +148,16 @@ class SupervisedVAPLoss(torch.nn.Module):
         kl = p * torch.log((p + eps) / (pi_0 + eps)) + (1 - p) * torch.log((1 - p + eps) / (1 - pi_0 + eps))
         kl_mean = kl.sum() / kl.shape[0]
         return {'loss': base['loss'] + self.beta * kl_mean, 'nll': base['nll']}
+
+class MaxInstanceLoss(torch.nn.Module):
+    def __init__(self, base_criterion, gamma, pool_layer):
+        super().__init__()
+        self.base_criterion = base_criterion
+        self.gamma = gamma
+        self.pool_layer = pool_layer
+
+    def forward(self, logits, labels, **kwargs):
+        base = self.base_criterion(logits, labels, **kwargs)
+        max_logits = self.pool_layer.max_logits  # (num_bags, 1)
+        aux = torch.nn.functional.binary_cross_entropy_with_logits(max_logits, labels)
+        return {'loss': base['loss'] + self.gamma * aux, 'nll': base['nll']}
