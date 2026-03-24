@@ -16,7 +16,7 @@ class MILTensorDatasetWithInstanceLabels(torch.utils.data.Dataset):
         self.bags = list(torch.split(X, list(lengths)))
         self.lengths = lengths
         self.y = y
-        self.instance_labels = [torch.tensor(ly, dtype=torch.float32).unsqueeze(-1) for ly in lengths_y]
+        self.instance_labels = [torch.tensor(ly[:l], dtype=torch.float32).unsqueeze(-1) for ly, l in zip(lengths_y, lengths)]
 
     def __len__(self):
         return len(self.bags)
