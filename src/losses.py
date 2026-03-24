@@ -131,3 +131,20 @@ class VAPLoss(torch.nn.Module):
         base = self.base_criterion(logits, labels, **kwargs)
         kl = self.vap_layer.kl
         return {'loss': base['loss'] + self.beta * kl, 'nll': base['nll']}
+
+class SupervisedVAPLoss(torch.nn.Module):
+    def __init__(self, base_criterion, beta):
+        super().__init__()
+        self.base_criterion = base_criterion
+        self.beta = beta
+
+    def forward(self, logits, labels, **kwargs):
+        base = self.base_criterion(logits, labels, **kwargs)
+        p = kwargs['attn_weights']  # (sum(lengths), 1) — gate probabilities
+        instance_labels = kwargs['instance_labels']  # (sum(lengths), 1) — true 0/1
+        # KL(Bernoulli(p) || Bernoulli(pi_0)) with pi_0 from true labels
+        pi_0 = instance_labels * 0.99 + (1 - instance_labels) * 0.01
+        eps = 1e-8
+        kl = p * torch.log((p + eps) / (pi_0 + eps)) + (1 - p) * torch.log((1 - p + eps) / (1 - pi_0 + eps))
+        kl_mean = kl.sum() / kl.shape[0]
+        return {'loss': base['loss'] + self.beta * kl_mean, 'nll': base['nll']}
