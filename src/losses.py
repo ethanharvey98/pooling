@@ -119,4 +119,15 @@ class GuidedNormalL1Loss(torch.nn.Module):
         stds_penalty = (self.beta/2) * ((stds-ideal_stds)**2).mean()
         
         return {'loss': nll + penalty + stds_penalty, 'nll': nll}
-    
+
+class VAPLoss(torch.nn.Module):
+    def __init__(self, base_criterion, beta, vap_layer):
+        super().__init__()
+        self.base_criterion = base_criterion
+        self.beta = beta
+        self.vap_layer = vap_layer
+
+    def forward(self, logits, labels, **kwargs):
+        base = self.base_criterion(logits, labels, **kwargs)
+        kl = self.vap_layer.kl
+        return {'loss': base['loss'] + self.beta * kl, 'nll': base['nll']}

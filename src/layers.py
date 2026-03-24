@@ -1,3 +1,4 @@
+import math
 from typing import Tuple, Optional
 import torch
 # Importing our custom module(s)
@@ -71,6 +72,87 @@ class ABMIL(torch.nn.Module):
         ])
         return out, attn_weights
         
+class BernoulliVAP(torch.nn.Module):
+    def __init__(
+        self,
+        in_features: int,
+        hidden_dim: int = 128,
+        pi_max: float = 0.5,
+        sigma: float = 0.25,
+        tau: float = 0.5,
+    ):
+        super().__init__()
+        self.mlp = torch.nn.Sequential(
+            torch.nn.Linear(in_features=in_features, out_features=hidden_dim),
+            torch.nn.Tanh(),
+            torch.nn.Linear(in_features=hidden_dim, out_features=1),
+        )
+        self.pi_max = pi_max
+        self.sigma = sigma
+        self.tau = tau
+        self.kl = torch.tensor(0.0)
+
+    def _center_prior(
+        self,
+        lengths: Tuple[int, ...],
+        device: torch.device,
+    ) -> torch.Tensor:
+        """Axial-slice-dependent prior: Gaussian bump centered at bag midpoint."""
+        pi_0s = []
+        for length in lengths:
+            t = (torch.arange(length, device=device) + 0.5) / length  # (0, 1)
+            pi_0 = self.pi_max * torch.exp(-0.5 * ((t - 0.5) / self.sigma) ** 2)
+            pi_0s.append(pi_0)
+        return torch.cat(pi_0s).unsqueeze(-1)  # (sum(lengths), 1)
+
+    def _bernoulli_kl(
+        self,
+        p: torch.Tensor,
+        pi_0: torch.Tensor,
+    ) -> torch.Tensor:
+        """KL(Bernoulli(p) || Bernoulli(pi_0)), per-instance."""
+        eps = 1e-8
+        return p * torch.log((p + eps) / (pi_0 + eps)) + (1 - p) * torch.log((1 - p + eps) / (1 - pi_0 + eps))
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        lengths: Tuple[int, ...],
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        logits = self.mlp(x)  # (sum(lengths), 1)
+        p = torch.sigmoid(logits)  # posterior inclusion probability
+
+        # Gumbel-Sigmoid sampling (training) vs hard threshold (eval)
+        if self.training:
+            u = torch.rand_like(logits).clamp(1e-8, 1 - 1e-8)
+            gumbel_noise = torch.log(u) - torch.log(1 - u)
+            z = torch.sigmoid((logits + gumbel_noise) / self.tau)
+        else:
+            z = (p >= 0.5).float()
+
+        # Fallback: if all gates are 0 for a bag, keep the top-1 by p
+        z_split = list(torch.split(z, lengths))
+        p_split = list(torch.split(p, lengths))
+        for i, z_i in enumerate(z_split):
+            if z_i.sum() == 0:
+                top_idx = p_split[i].squeeze(-1).argmax()
+                z_split[i] = torch.zeros_like(z_i)
+                z_split[i][top_idx] = 1.0
+        z = torch.cat(z_split)
+
+        # Normalized weighted pooling: h_k = sum(z_ki * x_ki) / (sum(z_ki) + eps)
+        out = torch.cat([
+            (z_i * x_i).sum(dim=0, keepdim=True) / (z_i.sum() + 1e-8)
+            for z_i, x_i in zip(torch.split(z, lengths), torch.split(x, lengths))
+        ])
+
+        # KL divergence (mean over all instances in batch)
+        pi_0 = self._center_prior(lengths, x.device)
+        kl_per_instance = self._bernoulli_kl(p, pi_0)
+        self.kl = kl_per_instance.sum() / sum(lengths)
+
+        return out, p
+
 class InstanceConv1d(torch.nn.Module):
     def __init__(
         self, 

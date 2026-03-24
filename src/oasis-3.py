@@ -24,6 +24,10 @@ if __name__=="__main__":
     parser.add_argument("--seed", default=42, help="TODO (default: 42)", type=int)
     parser.add_argument("--weight_decay", default=0.0, help="Weight decay (default: 0.0)", type=float)
     parser.add_argument("--neighbors", default=1, help="Number of neighbors for SmAP pooling (default: 1)", type=int)
+    parser.add_argument("--beta", default=0.0, help="KL weight for VAP (default: 0.0)", type=float)
+    parser.add_argument("--pi_max", default=0.5, help="VAP center prior peak (default: 0.5)", type=float)
+    parser.add_argument("--sigma", default=0.25, help="VAP center prior width (default: 0.25)", type=float)
+    parser.add_argument("--tau", default=0.5, help="VAP Gumbel-Sigmoid temperature (default: 0.5)", type=float)
     args = parser.parse_args()
     
     torch.manual_seed(args.seed)
@@ -43,10 +47,11 @@ if __name__=="__main__":
     val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=args.batch_size, collate_fn=utils.collate_fn)
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=args.batch_size, collate_fn=utils.collate_fn)
         
+    pool_kwargs = dict(pi_max=args.pi_max, sigma=args.sigma, tau=args.tau) if args.pooling == 'BernoulliVAP' else {}
     if args.embedding_level:
-        model = models.PoolClf(in_features=train_data["X"].shape[1], out_features=1, pooling=args.pooling, neighbors=args.neighbors)
+        model = models.PoolClf(in_features=train_data["X"].shape[1], out_features=1, pooling=args.pooling, neighbors=args.neighbors, **pool_kwargs)
     else:
-        model = models.ClfPool(in_features=train_data["X"].shape[1], out_features=1, pooling=args.pooling, neighbors=args.neighbors)
+        model = models.ClfPool(in_features=train_data["X"].shape[1], out_features=1, pooling=args.pooling, neighbors=args.neighbors, **pool_kwargs)
             
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print(device)
@@ -59,7 +64,10 @@ if __name__=="__main__":
         criterion = losses.L1Loss(alpha=args.alpha, criterion=torch.nn.BCEWithLogitsLoss())
     elif args.criterion == "L2":
         criterion = losses.L2Loss(alpha=args.alpha, criterion=torch.nn.BCEWithLogitsLoss())
-    
+
+    if args.pooling == 'BernoulliVAP':
+        criterion = losses.VAPLoss(criterion, beta=args.beta, vap_layer=model.pool)
+
     optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.weight_decay, momentum=0.9)
     
     columns = ["epoch", "test_auroc", "test_auprc", "test_bal_acc", "test_loss", "test_nll", "train_auroc", "train_auprc", "train_bal_acc", "train_loss", "train_nll", "val_auroc", "val_auprc", "val_bal_acc", "val_loss", "val_nll"]
