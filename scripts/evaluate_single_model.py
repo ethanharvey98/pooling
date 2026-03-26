@@ -56,7 +56,7 @@ def main():
     parser = argparse.ArgumentParser(description='Evaluate attention metrics for a single model')
     parser.add_argument('model_path', type=str, help='Path to .pt model file')
     parser.add_argument('--method', type=str, default='ABMIL',
-                        choices=['ABMIL', 'TransMIL', 'SmAP'],
+                        choices=['ABMIL', 'TransMIL', 'SmAP', 'InstanceClassifier'],
                         help='Pooling method (default: ABMIL)')
     parser.add_argument('--seed', type=int, default=1001,
                         help='Random seed for test split (default: 1001)')

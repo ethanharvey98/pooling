@@ -50,4 +50,12 @@ class PoolClf(torch.nn.Module):
         out, attn_weights = self.pool(x, lengths)
         out = self.clf(out)
         return out, attn_weights
-    
+
+class InstanceClassifier(torch.nn.Module):
+    def __init__(self, in_features, out_features):
+        super().__init__()
+        self.clf = torch.nn.Linear(in_features=in_features, out_features=out_features, bias=True)
+
+    def forward(self, x, lengths):
+        out = attn_weights = self.clf(x)
+        return out, attn_weights

@@ -78,7 +78,9 @@ def load_model(model_path, in_features, pooling, embedding_level=True):
     Returns:
         Loaded model in eval mode
     """
-    if embedding_level:
+    if pooling == 'InstanceClassifier':
+        model = models.InstanceClassifier(in_features, 1)
+    elif embedding_level:
         model = models.PoolClf(in_features, 1, pooling)
     else:
         model = models.ClfPool(in_features, 1, pooling)
@@ -102,6 +104,8 @@ def get_attention(model, X, lengths, embedding_level=True):
     """
     with torch.no_grad():
         _, attn = model(X, lengths)
+        if isinstance(model, models.InstanceClassifier):
+            return torch.sigmoid(attn).squeeze().numpy()
         if embedding_level:
             return attn.squeeze().numpy()
         return torch.sigmoid(model.clf(X)).squeeze().numpy()
