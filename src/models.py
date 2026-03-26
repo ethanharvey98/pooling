@@ -57,5 +57,9 @@ class InstanceClassifier(torch.nn.Module):
         self.clf = torch.nn.Linear(in_features=in_features, out_features=out_features, bias=True)
 
     def forward(self, x, lengths):
-        out = attn_weights = self.clf(x)
+        out = attn_logits = self.clf(x)
+        attn_weights = torch.cat([
+            torch.nn.functional.softmax(attn_logits_i, dim=0)
+            for attn_logits_i in torch.split(attn_logits, lengths)
+        ])
         return out, attn_weights

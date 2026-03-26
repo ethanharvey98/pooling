@@ -105,7 +105,7 @@ def get_attention(model, X, lengths, embedding_level=True):
     with torch.no_grad():
         _, attn = model(X, lengths)
         if isinstance(model, models.InstanceClassifier):
-            return torch.sigmoid(attn).squeeze().numpy()
+            return attn.squeeze().numpy()
         if embedding_level:
             return attn.squeeze().numpy()
         return torch.sigmoid(model.clf(X)).squeeze().numpy()
