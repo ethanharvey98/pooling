@@ -24,11 +24,11 @@ import torch
 
 def load_raw_data(data_dir):
     """Load all .npy files from the P-MIL download."""
-    features = np.load(f'{data_dir}/THUMOS14-I3D-JOINTFeatures.npy', allow_pickle=True)
-    videonames = np.load(f'{data_dir}/videoname.npy', allow_pickle=True)
-    subsets = np.load(f'{data_dir}/subset.npy', allow_pickle=True)
-    labels_all = np.load(f'{data_dir}/labels_all.npy', allow_pickle=True)
-    classlist = np.load(f'{data_dir}/classlist.npy', allow_pickle=True)
+    features = np.load(f'{data_dir}/THUMOS14-I3D-JOINTFeatures.npy', allow_pickle=True, encoding='latin1')
+    videonames = np.load(f'{data_dir}/videoname.npy', allow_pickle=True, encoding='latin1')
+    subsets = np.load(f'{data_dir}/subset.npy', allow_pickle=True, encoding='latin1')
+    labels_all = np.load(f'{data_dir}/labels_all.npy', allow_pickle=True, encoding='latin1')
+    classlist = np.load(f'{data_dir}/classlist.npy', allow_pickle=True, encoding='latin1')
 
     # Decode bytes to strings if needed
     videonames = np.array([v.decode('utf-8') if isinstance(v, bytes) else str(v) for v in videonames])
@@ -45,8 +45,8 @@ def load_raw_data(data_dir):
                 multi_hot[i, classlist.index(label_str)] = 1.0
 
     # Load temporal annotations (for test set instance labels)
-    segments = np.load(f'{data_dir}/segments.npy', allow_pickle=True)
-    seg_labels = np.load(f'{data_dir}/labels.npy', allow_pickle=True)
+    segments = np.load(f'{data_dir}/segments.npy', allow_pickle=True, encoding='latin1')
+    seg_labels = np.load(f'{data_dir}/labels.npy', allow_pickle=True, encoding='latin1')
 
     return features, videonames, subsets, multi_hot, classlist, segments, seg_labels
 

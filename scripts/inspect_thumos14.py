@@ -16,7 +16,7 @@ print(f"=== Contents of {data_dir} ===")
 for f in sorted(os.listdir(data_dir)):
     path = os.path.join(data_dir, f)
     if f.endswith('.npy'):
-        arr = np.load(path, allow_pickle=True)
+        arr = np.load(path, allow_pickle=True, encoding='latin1')
         print(f"\n--- {f} ---")
         print(f"  type={type(arr)}, dtype={arr.dtype}, shape={arr.shape}")
         if arr.dtype == object:
@@ -28,19 +28,21 @@ for f in sorted(os.listdir(data_dir)):
                 elif isinstance(val, (list, tuple)):
                     print(f"    [{i}]: list, len={len(val)}, first={val[:3] if val else '(empty)'}")
                 elif isinstance(val, bytes):
-                    print(f"    [{i}]: bytes, val={val.decode('utf-8')}")
+                    print(f"    [{i}]: bytes, val={val.decode('latin1')}")
+                elif isinstance(val, str):
+                    print(f"    [{i}]: str, val={val}")
                 else:
-                    print(f"    [{i}]: {type(val).__name__}, val={val}")
+                    print(f"    [{i}]: {type(val).__name__}, val={repr(val)[:200]}")
         else:
             print(f"  first 3 rows: {arr[:3]}")
-    else:
+    elif os.path.isfile(path):
         size = os.path.getsize(path) / (1024*1024)
         print(f"\n--- {f} ({size:.1f} MB) ---")
 
 # Feature statistics
 print("\n=== Feature Statistics ===")
-features = np.load(f'{data_dir}/THUMOS14-I3D-JOINTFeatures.npy', allow_pickle=True)
-subsets = np.load(f'{data_dir}/subset.npy', allow_pickle=True)
+features = np.load(f'{data_dir}/THUMOS14-I3D-JOINTFeatures.npy', allow_pickle=True, encoding='latin1')
+subsets = np.load(f'{data_dir}/subset.npy', allow_pickle=True, encoding='latin1')
 subsets = np.array([s.decode('utf-8') if isinstance(s, bytes) else str(s) for s in subsets])
 
 for split in np.unique(subsets):
