@@ -13,10 +13,11 @@ conda activate jupyter-env
 seeds=(1001 2001 3001)
 seed=${seeds[$SLURM_ARRAY_TASK_ID]}
 
+# Per-class mode: generates one binary task per action class (20 classes)
 python ../src/convert_thumos14.py \
     --data_dir='/cluster/tufts/hugheslab/dloevl01/datasets/THUMOS14' \
     --output_dir='/cluster/tufts/hugheslab/dloevl01/datasets/THUMOS14_encoded' \
-    --mode=binary \
+    --mode=per_class \
     --seed=${seed}
 
 conda deactivate

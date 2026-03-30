@@ -93,14 +93,10 @@ def train_one_epoch(model, criterion, optimizer, dataloader, lr_scheduler=None):
     probs = torch.nn.functional.sigmoid(logits).numpy()
     preds = (probs >= 0.5).astype(int)
     labels = torch.stack(metrics['labels'])
-    labels_np = labels.numpy()
-    if len(np.unique(labels_np)) > 1:
-        metrics['auroc'] = roc_auc_score(labels_np, probs)
-        metrics['auprc'] = average_precision_score(labels_np, probs)
-    else:
-        metrics['auroc'] = 0.5
-        metrics['auprc'] = 0.0
-    metrics['bal_acc'] = balanced_accuracy_score(labels_np, preds)
+    labels = torch.stack(metrics['labels'])
+    metrics['auroc'] = roc_auc_score(labels.numpy(), probs)
+    metrics['auprc'] = average_precision_score(labels.numpy(), probs)
+    metrics['bal_acc'] = balanced_accuracy_score(labels.numpy(), preds)
 
     return metrics
 
@@ -137,13 +133,9 @@ def evaluate(model, criterion, dataloader):
         probs = torch.nn.functional.sigmoid(logits).numpy()
         preds = (probs >= 0.5).astype(int)
         labels = torch.stack(metrics['labels'])
-        labels_np = labels.numpy()
-        if len(np.unique(labels_np)) > 1:
-            metrics['auroc'] = roc_auc_score(labels_np, probs)
-            metrics['auprc'] = average_precision_score(labels_np, probs)
-        else:
-            metrics['auroc'] = 0.5
-            metrics['auprc'] = 0.0
-        metrics['bal_acc'] = balanced_accuracy_score(labels_np, preds)
+        labels = torch.stack(metrics['labels'])
+        metrics['auroc'] = roc_auc_score(labels.numpy(), probs)
+        metrics['auprc'] = average_precision_score(labels.numpy(), probs)
+        metrics['bal_acc'] = balanced_accuracy_score(labels.numpy(), preds)
 
     return metrics
