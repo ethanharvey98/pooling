@@ -2,7 +2,7 @@
 #SBATCH --array=0-2879%8
 #SBATCH --error=/cluster/tufts/hugheslab/dloevl01/slurmlog/err/logaction_%j.err
 #SBATCH --gres=gpu:a100:1
-#SBATCH --constraint=40GB
+#SBATCH --constraint=a100-40G
 #SBATCH --mem=16g
 #SBATCH --ntasks=4
 #SBATCH --output=/cluster/tufts/hugheslab/dloevl01/slurmlog/out/logaction_%j.out
