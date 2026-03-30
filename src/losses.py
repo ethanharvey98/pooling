@@ -92,6 +92,49 @@ class GuidedAttentionL1Loss(torch.nn.Module):
         
         return {'loss': nll + penalty + attn_weights_penalty, 'nll': nll}
     
+class GuidedAttentionCEL1Loss(torch.nn.Module):
+    """Guided attention using cross-entropy between reference and attention (Eq. 1 from paper)."""
+    def __init__(self, alpha, beta, criterion=torch.nn.CrossEntropyLoss()):
+        super().__init__()
+        self.alpha = alpha
+        self.beta = beta
+        self.criterion = criterion
+
+    def get_x(self, y):
+        assert y.dim() == 1, f"get_x() expects 1D tensor, got shape {y.shape}"
+        return torch.arange(1, len(y) + 1, device=y.device)
+
+    def calc_mean(self, y):
+        assert y.dim() == 1, f"calc_mean() expects 1D tensor, got shape {y.shape}"
+        x = self.get_x(y)
+        return torch.sum(x * y) / torch.sum(y)
+
+    def calc_std(self, y):
+        assert y.dim() == 1, f"calc_std() expects 1D tensor, got shape {y.shape}"
+        x = self.get_x(y)
+        mean = torch.sum(x * y) / torch.sum(y)
+        variance = torch.sum(x ** 2 * y) / torch.sum(y) - mean ** 2
+        return torch.sqrt(variance)
+
+    def forward(self, logits, labels, **kwargs):
+        params = kwargs["params"]
+        lengths = kwargs["lengths"]
+        attn_weights = kwargs["attn_weights"].view(-1)
+
+        nll = self.criterion(logits, labels)
+
+        with torch.no_grad():
+            js = [self.get_x(attn_weights_i) for attn_weights_i in torch.split(attn_weights, lengths)]
+            means = [self.calc_mean(attn_weights_i) for attn_weights_i in torch.split(attn_weights, lengths)]
+            stds = [self.calc_std(attn_weights_i) for attn_weights_i in torch.split(attn_weights, lengths)]
+            r_hats = torch.cat([utils.normal_pdf(j, mean, std) for j, mean, std in zip(js, means, stds)])
+            rs = torch.cat([r_hat / (r_hat.sum() + 1e-6) for r_hat in torch.split(r_hats, lengths)])
+
+        penalty = (self.alpha / 2) * torch.abs(params).sum()
+        attn_weights_penalty = -self.beta * torch.stack([diff.mean() for diff in torch.split(rs * torch.log(attn_weights + 1e-8), lengths)]).mean()
+
+        return {'loss': nll + penalty + attn_weights_penalty, 'nll': nll}
+
 class GuidedNormalL1Loss(torch.nn.Module):
     def __init__(self, alpha, beta, criterion=torch.nn.CrossEntropyLoss(), max_std=100.0, min_std=1.0):
         super().__init__()

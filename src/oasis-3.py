@@ -24,6 +24,7 @@ if __name__=="__main__":
     parser.add_argument("--seed", default=42, help="TODO (default: 42)", type=int)
     parser.add_argument("--weight_decay", default=0.0, help="Weight decay (default: 0.0)", type=float)
     parser.add_argument("--neighbors", default=1, help="Number of neighbors for SmAP pooling (default: 1)", type=int)
+    parser.add_argument("--beta", default=0.0, help="Guided attention weight (default: 0.0)", type=float)
     args = parser.parse_args()
     
     torch.manual_seed(args.seed)
@@ -52,13 +53,15 @@ if __name__=="__main__":
     print(device)
     model.to(device)
     
-    assert args.criterion in ["ERM", "L1", "L2"]
+    assert args.criterion in ["ERM", "L1", "L2", "GuidedL1"]
     if args.criterion == "ERM":
         criterion = losses.ERMLoss(criterion=torch.nn.BCEWithLogitsLoss())
     elif args.criterion == "L1":
         criterion = losses.L1Loss(alpha=args.alpha, criterion=torch.nn.BCEWithLogitsLoss())
     elif args.criterion == "L2":
         criterion = losses.L2Loss(alpha=args.alpha, criterion=torch.nn.BCEWithLogitsLoss())
+    elif args.criterion == "GuidedL1":
+        criterion = losses.GuidedAttentionCEL1Loss(alpha=args.alpha, beta=args.beta, criterion=torch.nn.BCEWithLogitsLoss())
     
     optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.weight_decay, momentum=0.9)
     
