@@ -22,68 +22,101 @@ from sklearn.model_selection import train_test_split
 import torch
 
 
+def decode(val):
+    return val.decode('latin1') if isinstance(val, bytes) else str(val)
+
+
 def load_raw_data(data_dir):
     """Load all .npy files from the P-MIL download."""
-    features = np.load(f'{data_dir}/THUMOS14-I3D-JOINTFeatures.npy', allow_pickle=True, encoding='latin1')
-    videonames = np.load(f'{data_dir}/videoname.npy', allow_pickle=True, encoding='latin1')
-    subsets = np.load(f'{data_dir}/subset.npy', allow_pickle=True, encoding='latin1')
-    labels_all = np.load(f'{data_dir}/labels_all.npy', allow_pickle=True, encoding='latin1')
-    classlist = np.load(f'{data_dir}/classlist.npy', allow_pickle=True, encoding='latin1')
+    # Auto-detect feature file name
+    for name in ['Thumos14reduced-I3D-JOINTFeatures.npy', 'THUMOS14-I3D-JOINTFeatures.npy']:
+        if os.path.exists(f'{data_dir}/{name}'):
+            feat_path = f'{data_dir}/{name}'
+            break
+    else:
+        raise FileNotFoundError("Could not find feature .npy file")
 
-    # Decode bytes to strings if needed
-    videonames = np.array([v.decode('utf-8') if isinstance(v, bytes) else str(v) for v in videonames])
-    subsets = np.array([s.decode('utf-8') if isinstance(s, bytes) else str(s) for s in subsets])
-    classlist = [c.decode('utf-8') if isinstance(c, bytes) else str(c) for c in classlist]
+    # Auto-detect annotations directory
+    for name in ['Thumos14reduced-Annotations', 'Thumos14-Annotations']:
+        if os.path.isdir(f'{data_dir}/{name}'):
+            ann_dir = f'{data_dir}/{name}'
+            break
+    else:
+        ann_dir = data_dir  # annotations might be in the same directory
+
+    load = lambda f: np.load(f, allow_pickle=True, encoding='latin1')
+
+    features = load(feat_path)
+    videonames = np.array([decode(v) for v in load(f'{ann_dir}/videoname.npy')])
+    subsets = np.array([decode(s) for s in load(f'{ann_dir}/subset.npy')])
+    labels_all = load(f'{ann_dir}/labels_all.npy')  # per-video: list of class name strings
+    classlist = [decode(c) for c in load(f'{ann_dir}/classlist.npy')]
+    segments = load(f'{ann_dir}/segments.npy')       # per-video: list of [start, end] pairs
+    seg_labels = load(f'{ann_dir}/labels.npy')       # per-video: list of class names per segment
+    duration = load(f'{ann_dir}/duration.npy')        # (412, 1) video durations in seconds
 
     # Convert string labels to multi-hot
     num_classes = len(classlist)
     multi_hot = np.zeros((len(labels_all), num_classes), dtype=np.float32)
     for i, label_list in enumerate(labels_all):
         for label in label_list:
-            label_str = label.decode('utf-8') if isinstance(label, bytes) else str(label)
+            label_str = decode(label)
             if label_str in classlist:
                 multi_hot[i, classlist.index(label_str)] = 1.0
 
-    # Load temporal annotations (for test set instance labels)
-    segments = np.load(f'{data_dir}/segments.npy', allow_pickle=True, encoding='latin1')
-    seg_labels = np.load(f'{data_dir}/labels.npy', allow_pickle=True, encoding='latin1')
-
-    return features, videonames, subsets, multi_hot, classlist, segments, seg_labels
+    return features, videonames, subsets, multi_hot, classlist, segments, seg_labels, duration
 
 
 def make_bag_label(multi_hot, mode, class_index):
-    """Convert multi-hot to binary bag label."""
     if mode == 'binary':
         return (multi_hot.sum(axis=1) > 0).astype(np.float32).reshape(-1, 1)
     else:
         return multi_hot[:, class_index].astype(np.float32).reshape(-1, 1)
 
 
-def make_instance_labels(features, videonames, segments, seg_labels, classlist, indices, mode, class_index):
-    """Convert temporal segment annotations to per-snippet binary labels."""
+def make_instance_labels(features, segments, seg_labels, duration, classlist, indices, mode, class_index):
+    """Convert temporal segment annotations to per-snippet binary labels.
+
+    Each snippet covers duration[i] / T_i seconds. A snippet is positive if its
+    center falls within a ground-truth segment of the target class(es).
+    """
     lengths_y = []
 
     for idx in indices:
         T = features[idx].shape[0]
+        vid_duration = duration[idx].item()
+        snippet_duration = vid_duration / T
+
+        # Snippet center times
+        snippet_centers = np.array([(j + 0.5) * snippet_duration for j in range(T)])
         snippet_labels = np.zeros(T, dtype=int)
 
-        # Find segments belonging to this video
-        video_name = videonames[idx]
-        for seg, seg_label in zip(segments, seg_labels):
-            seg_label_str = seg_label.decode('utf-8') if isinstance(seg_label, bytes) else str(seg_label)
+        vid_segments = segments[idx]  # list of [start, end]
+        vid_seg_labels = seg_labels[idx]  # list of class name strings
 
-            # Check if this segment belongs to this video (segments may be stored differently)
-            # The exact format depends on the download - segments may be per-video or global
-            # We'll handle both cases in the actual implementation after inspecting the data
-            pass
+        for seg, seg_label in zip(vid_segments, vid_seg_labels):
+            seg_label_str = decode(seg_label)
+
+            # Check if this segment's class matches the target
+            if mode == 'binary':
+                matches = True
+            else:
+                matches = (seg_label_str == classlist[class_index])
+
+            if matches:
+                start, end = seg[0], seg[1]
+                # Mark snippets whose center falls within [start, end]
+                mask = (snippet_centers >= start) & (snippet_centers <= end)
+                snippet_labels[mask] = 1
 
         lengths_y.append(snippet_labels.tolist())
 
     return lengths_y
 
 
-def build_split(features, multi_hot, indices, mode, class_index):
-    """Build X, lengths, y tensors for a split."""
+def build_split(features, multi_hot, segments, seg_labels, duration, classlist,
+                indices, mode, class_index, include_instance_labels=False):
+    """Build X, lengths, y (and optionally lengths_y) for a split."""
     X_list, lengths, y_list = [], [], []
 
     for idx in indices:
@@ -95,7 +128,16 @@ def build_split(features, multi_hot, indices, mode, class_index):
 
     X = torch.cat(X_list)
     y = torch.cat(y_list)
-    return X, tuple(lengths), y
+
+    result = {'X': X, 'lengths': tuple(lengths), 'y': y}
+
+    if include_instance_labels:
+        lengths_y = make_instance_labels(
+            features, segments, seg_labels, duration, classlist, indices, mode, class_index
+        )
+        result['lengths_y'] = lengths_y
+
+    return result
 
 
 if __name__ == '__main__':
@@ -109,17 +151,19 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=1001)
     args = parser.parse_args()
 
-    features, videonames, subsets, multi_hot, classlist, segments, seg_labels = load_raw_data(args.data_dir)
+    features, videonames, subsets, multi_hot, classlist, segments, seg_labels, duration = load_raw_data(args.data_dir)
 
     print(f"Loaded {len(features)} videos, {len(classlist)} classes")
     print(f"Classes: {classlist}")
-    print(f"Feature dims: {features[0].shape}")
+    print(f"Feature dim: {features[0].shape[1]}")
 
     # Split indices
     train_val_mask = subsets == 'validation'
     test_mask = subsets == 'test'
     train_val_indices = np.where(train_val_mask)[0]
     test_indices = np.where(test_mask)[0]
+
+    print(f"Train+val: {len(train_val_indices)} videos, Test: {len(test_indices)} videos")
 
     # Determine which class indices to process
     if args.mode == 'binary':
@@ -132,7 +176,6 @@ if __name__ == '__main__':
     for ci in class_indices:
         # Stratified train/val split
         bag_labels = make_bag_label(multi_hot[train_val_indices], args.mode, ci).flatten()
-        # Only stratify if both classes are present
         stratify = bag_labels if len(np.unique(bag_labels)) > 1 else None
         tv_local_train, tv_local_val = train_test_split(
             np.arange(len(train_val_indices)),
@@ -143,10 +186,13 @@ if __name__ == '__main__':
         train_indices = train_val_indices[tv_local_train]
         val_indices = train_val_indices[tv_local_val]
 
-        # Build splits
-        train_X, train_lengths, train_y = build_split(features, multi_hot, train_indices, args.mode, ci)
-        val_X, val_lengths, val_y = build_split(features, multi_hot, val_indices, args.mode, ci)
-        test_X, test_lengths, test_y = build_split(features, multi_hot, test_indices, args.mode, ci)
+        # Build splits (instance labels for all splits since annotations exist for both)
+        train_data = build_split(features, multi_hot, segments, seg_labels, duration, classlist,
+                                 train_indices, args.mode, ci, include_instance_labels=True)
+        val_data = build_split(features, multi_hot, segments, seg_labels, duration, classlist,
+                               val_indices, args.mode, ci, include_instance_labels=True)
+        test_data = build_split(features, multi_hot, segments, seg_labels, duration, classlist,
+                                test_indices, args.mode, ci, include_instance_labels=True)
 
         # Output directory
         if args.mode == 'binary':
@@ -155,22 +201,18 @@ if __name__ == '__main__':
             out_dir = f'{args.output_dir}/class={ci}_{classlist[ci]}/seed={args.seed}'
         os.makedirs(out_dir, exist_ok=True)
 
-        # Save splits
-        torch.save({'X': train_X, 'lengths': train_lengths, 'y': train_y}, f'{out_dir}/train.pth')
-        torch.save({'X': val_X, 'lengths': val_lengths, 'y': val_y}, f'{out_dir}/val.pth')
-        torch.save({'X': test_X, 'lengths': test_lengths, 'y': test_y}, f'{out_dir}/test.pth')
+        torch.save(train_data, f'{out_dir}/train.pth')
+        torch.save(val_data, f'{out_dir}/val.pth')
+        torch.save(test_data, f'{out_dir}/test.pth')
 
         label_name = 'binary' if args.mode == 'binary' else f'{ci}_{classlist[ci]}'
-        pos_train = train_y.sum().item()
-        pos_test = test_y.sum().item()
-        print(f"[{label_name}] train={len(train_lengths)} ({pos_train:.0f}+), "
-              f"val={len(val_lengths)}, test={len(test_lengths)} ({pos_test:.0f}+)")
-        print(f"  X dims: train={train_X.shape}, val={val_X.shape}, test={test_X.shape}")
-        print(f"  Saved to {out_dir}")
+        pos_train = train_data['y'].sum().item()
+        pos_test = test_data['y'].sum().item()
 
-    # NOTE: Instance-level labels (lengths_y) for test set will be added after
-    # inspecting the exact format of segments.npy and labels.npy on the HPC.
-    # The temporal annotation → per-snippet label conversion depends on knowing
-    # the snippet duration, which we need to verify from the downloaded data.
-    print("\nNOTE: Run inspect_thumos14.py after download to verify annotation format,")
-    print("then update this script to generate instance-level labels (lengths_y).")
+        # Count positive snippets in test set
+        test_pos_snippets = sum(sum(ly) for ly in test_data['lengths_y'])
+        test_total_snippets = sum(test_data['lengths'])
+        print(f"[{label_name}] train={len(train_data['lengths'])} ({pos_train:.0f}+ bags), "
+              f"val={len(val_data['lengths'])}, test={len(test_data['lengths'])} ({pos_test:.0f}+ bags, "
+              f"{test_pos_snippets}/{test_total_snippets} positive snippets)")
+        print(f"  Saved to {out_dir}")
