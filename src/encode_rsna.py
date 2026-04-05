@@ -132,7 +132,12 @@ if __name__ == '__main__':
             X.append(embeddings)
             lengths.append(length)
             y.append(label)
-            instance_y.append(torch.tensor(instance_label_map[scan_ids[i]][:length], dtype=torch.float32))
+            inst_labels = instance_label_map[scan_ids[i]]
+            if len(inst_labels) == length:
+                instance_y.append(torch.tensor(inst_labels, dtype=torch.float32))
+            else:
+                print(f"WARNING: {split_name} scan {scan_ids[i]} has {length} slices but {len(inst_labels)} labels, skipping instance labels")
+                instance_y.append(torch.full((length,), -1.0))
 
         torch.save({
             'X': torch.cat(X),
