@@ -32,14 +32,15 @@ if __name__ == '__main__':
     labels_df = labels_df[labels_df['path'].apply(os.path.exists)]
     print(f"Scans with npz files: {len(labels_df)}")
 
-    # Train/val/test split (4/6 train, 1/6 val, 1/6 test)
-    ids, id_labels = labels_df['Study ID'], labels_df['scan_label']
+    # Patient-level train/val/test split (4/6 train, 1/6 val, 1/6 test)
+    grouped_df = labels_df.groupby('Patient ID')['scan_label'].agg(lambda x: x.mode()[0]).reset_index()
+    ids, id_labels = grouped_df['Patient ID'], grouped_df['scan_label']
     train_and_val_ids, test_ids, train_and_val_id_labels, test_id_labels = train_test_split(ids, id_labels, test_size=1/6, random_state=args.seed, stratify=id_labels)
     train_ids, val_ids = train_test_split(train_and_val_ids, test_size=1/5, random_state=args.seed, stratify=train_and_val_id_labels)
 
-    train_df = labels_df[labels_df['Study ID'].isin(train_ids)]
-    val_df = labels_df[labels_df['Study ID'].isin(val_ids)]
-    test_df = labels_df[labels_df['Study ID'].isin(test_ids)]
+    train_df = labels_df[labels_df['Patient ID'].isin(train_ids)]
+    val_df = labels_df[labels_df['Patient ID'].isin(val_ids)]
+    test_df = labels_df[labels_df['Patient ID'].isin(test_ids)]
 
     print(f"Train: {len(train_df)} ({train_df['scan_label'].sum()} positive)")
     print(f"Val: {len(val_df)} ({val_df['scan_label'].sum()} positive)")
@@ -104,53 +105,27 @@ if __name__ == '__main__':
     print(device)
     model.to(device)
 
-    X, lengths, y = [], [], []
+    for split_name, split_df, split_dataset in [
+        ('train', train_df, train_dataset),
+        ('val', val_df, val_dataset),
+        ('test', test_df, test_dataset),
+    ]:
+        X, lengths, y, instance_y = [], [], [], []
+        any_lists = [ast.literal_eval(row['Any']) for _, row in split_df.iterrows()]
 
-    for image, length, label in train_dataset:
-        embeddings = torch.cat([
-            utils.encode_image(model, image[:,c].unsqueeze(1))
-            for c in range(image.shape[1])
-        ], dim=-1)
-        X.append(embeddings)
-        lengths.append(length)
-        y.append(label)
+        for i, (image, length, label) in enumerate(split_dataset):
+            embeddings = torch.cat([
+                utils.encode_image(model, image[:,c].unsqueeze(1))
+                for c in range(image.shape[1])
+            ], dim=-1)
+            X.append(embeddings)
+            lengths.append(length)
+            y.append(label)
+            instance_y.append(torch.tensor(any_lists[i][:length], dtype=torch.float32))
 
-    torch.save({
-        'X': torch.cat(X),
-        'lengths': tuple(lengths),
-        'y': torch.stack(y),
-    }, f'{args.encoded_dir}/train.pth')
-
-    X, lengths, y = [], [], []
-
-    for image, length, label in val_dataset:
-        embeddings = torch.cat([
-            utils.encode_image(model, image[:,c].unsqueeze(1))
-            for c in range(image.shape[1])
-        ], dim=-1)
-        X.append(embeddings)
-        lengths.append(length)
-        y.append(label)
-
-    torch.save({
-        'X': torch.cat(X),
-        'lengths': tuple(lengths),
-        'y': torch.stack(y),
-    }, f'{args.encoded_dir}/val.pth')
-
-    X, lengths, y = [], [], []
-
-    for image, length, label in test_dataset:
-        embeddings = torch.cat([
-            utils.encode_image(model, image[:,c].unsqueeze(1))
-            for c in range(image.shape[1])
-        ], dim=-1)
-        X.append(embeddings)
-        lengths.append(length)
-        y.append(label)
-
-    torch.save({
-        'X': torch.cat(X),
-        'lengths': tuple(lengths),
-        'y': torch.stack(y),
-    }, f'{args.encoded_dir}/test.pth')
+        torch.save({
+            'X': torch.cat(X),
+            'lengths': tuple(lengths),
+            'y': torch.stack(y),
+            'instance_y': torch.cat(instance_y),
+        }, f'{args.encoded_dir}/{split_name}.pth')
