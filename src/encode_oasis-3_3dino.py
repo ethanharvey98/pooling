@@ -72,7 +72,7 @@ if __name__ == '__main__':
             if not saved_slices:
                 vol = volumes[0][0, 0]  # (H, W, D)
                 n_slices = vol.shape[-1]
-                indices = list(range(0, n_slices, max(1, n_slices // 12)))[:12]
+                indices = [int(i) for i in torch.linspace(0, n_slices - 1, 12)]
                 fig, axes = plt.subplots(1, len(indices), figsize=(2 * len(indices), 2))
                 for i, idx in enumerate(indices):
                     axes[i].imshow(vol[:, :, idx].numpy(), cmap='gray')
