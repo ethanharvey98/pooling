@@ -8,84 +8,52 @@ import torchvision
 import datasets
 import utils
 
-class Squeeze(torch.nn.Module):
-    def __init__(self, dim=None):
-        super().__init__()
-        self.dim = dim
-
-    def forward(self, x):
-        return x.squeeze() if self.dim is None else x.squeeze(self.dim)
-
-# python ../src/encode_oasis-3.py --encoded_dir='/cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_CT/ViT_B_16/seed=1001' --encoder='ViT-B/16' --numpy_dir='/cluster/tufts/hugheslab/datasets/OASIS-3_CT_numpy' --seed=1001
-# python ../src/encode_oasis-3.py --encoded_dir='/cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_CT/ViT_B_16/seed=2001' --encoder='ViT-B/16' --numpy_dir='/cluster/tufts/hugheslab/datasets/OASIS-3_CT_numpy' --seed=2001
-# python ../src/encode_oasis-3.py --encoded_dir='/cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_CT/ViT_B_16/seed=3001' --encoder='ViT-B/16' --numpy_dir='/cluster/tufts/hugheslab/datasets/OASIS-3_CT_numpy' --seed=3001
-
-# python ../src/encode_oasis-3.py --encoded_dir='/cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_MRI/ViT_B_16/seed=1001' --encoder='ViT-B/16' --numpy_dir='/cluster/tufts/hugheslab/datasets/OASIS-3_MRI_numpy' --seed=1001
-# python ../src/encode_oasis-3.py --encoded_dir='/cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_MRI/ViT_B_16/seed=2001' --encoder='ViT-B/16' --numpy_dir='/cluster/tufts/hugheslab/datasets/OASIS-3_MRI_numpy' --seed=2001
-# python ../src/encode_oasis-3.py --encoded_dir='/cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_MRI/ViT_B_16/seed=3001' --encoder='ViT-B/16' --numpy_dir='/cluster/tufts/hugheslab/datasets/OASIS-3_MRI_numpy' --seed=3001
-
-# python ../src/encode_oasis-3.py --encoded_dir='/cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_CT/ConvNeXt_Tiny/seed=1001' --encoder='ConvNeXt-Tiny' --numpy_dir='/cluster/tufts/hugheslab/datasets/OASIS-3_CT_numpy' --seed=1001
-# python ../src/encode_oasis-3.py --encoded_dir='/cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_CT/ConvNeXt_Tiny/seed=2001' --encoder='ConvNeXt-Tiny' --numpy_dir='/cluster/tufts/hugheslab/datasets/OASIS-3_CT_numpy' --seed=2001
-# python ../src/encode_oasis-3.py --encoded_dir='/cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_CT/ConvNeXt_Tiny/seed=3001' --encoder='ConvNeXt-Tiny' --numpy_dir='/cluster/tufts/hugheslab/datasets/OASIS-3_CT_numpy' --seed=3001
-
-# python ../src/encode_oasis-3.py --encoded_dir='/cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_MRI/ConvNeXt_Tiny/seed=1001' --encoder='ConvNeXt-Tiny' --numpy_dir='/cluster/tufts/hugheslab/datasets/OASIS-3_MRI_numpy' --seed=1001
-# python ../src/encode_oasis-3.py --encoded_dir='/cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_MRI/ConvNeXt_Tiny/seed=2001' --encoder='ConvNeXt-Tiny' --numpy_dir='/cluster/tufts/hugheslab/datasets/OASIS-3_MRI_numpy' --seed=2001
-# python ../src/encode_oasis-3.py --encoded_dir='/cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_MRI/ConvNeXt_Tiny/seed=3001' --encoder='ConvNeXt-Tiny' --numpy_dir='/cluster/tufts/hugheslab/datasets/OASIS-3_MRI_numpy' --seed=3001
-
-# python ../src/encode_oasis-3.py --encoded_dir='/cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_CT/MedSAM/seed=1001' --encoder='MedSAM' --numpy_dir='/cluster/tufts/hugheslab/datasets/OASIS-3_CT_numpy' --seed=1001
-# python ../src/encode_oasis-3.py --encoded_dir='/cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_CT/MedSAM/seed=2001' --encoder='MedSAM' --numpy_dir='/cluster/tufts/hugheslab/datasets/OASIS-3_CT_numpy' --seed=2001
-# python ../src/encode_oasis-3.py --encoded_dir='/cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_CT/MedSAM/seed=3001' --encoder='MedSAM' --numpy_dir='/cluster/tufts/hugheslab/datasets/OASIS-3_CT_numpy' --seed=3001
-
-# python ../src/encode_oasis-3.py --encoded_dir='/cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_MRI/MedSAM/seed=1001' --encoder='MedSAM' --numpy_dir='/cluster/tufts/hugheslab/datasets/OASIS-3_MRI_numpy' --seed=1001
-# python ../src/encode_oasis-3.py --encoded_dir='/cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_MRI/MedSAM/seed=2001' --encoder='MedSAM' --numpy_dir='/cluster/tufts/hugheslab/datasets/OASIS-3_MRI_numpy' --seed=2001
-# python ../src/encode_oasis-3.py --encoded_dir='/cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_MRI/MedSAM/seed=3001' --encoder='MedSAM' --numpy_dir='/cluster/tufts/hugheslab/datasets/OASIS-3_MRI_numpy' --seed=3001
+# python ../src/encode_oasis-3.py --encoder='ViT-B/16' --numpy_dir='/cluster/tufts/hugheslab/datasets/OASIS-3_MRI_numpy' --encoded_dir='/cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_MRI/ViT_B_16/seed=1001' --seed=1001
+# python ../src/encode_oasis-3.py --encoder='3DINO' --numpy_dir='/cluster/tufts/hugheslab/datasets/OASIS-3_MRI_numpy' --encoded_dir='/cluster/tufts/hugheslab/eharve06/encoded_OASIS-3_MRI/3DINO_ViT_concat/seed=1001' --seed=1001 --n_last_blocks=4 --avgpool --hf_download
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='main.py')
-    parser.add_argument('--encoded_dir', help='Directory to save encoded dataset', type=str)
-    parser.add_argument('--encoder', help='Encoder pre-trained on ImageNet', type=str)
-    parser.add_argument('--numpy_dir', help='Directory to numpy dataset', type=str)
-    parser.add_argument('--seed', default=42, help='Random seed (default: 42)', type=int)
-    # 3DINO-specific args
-    parser.add_argument('--n_last_blocks', default=4, type=int, help='CLS tokens from last N blocks (3DINO)')
-    parser.add_argument('--avgpool', action='store_true', default=False, help='Append avg-pooled patch tokens (3DINO)')
-    parser.add_argument('--pretrained_weights', default=None, type=str, help='Path to 3DINO weights')
-    parser.add_argument('--hf_download', action='store_true', default=False, help='Download 3DINO weights from HuggingFace')
+    parser = argparse.ArgumentParser(description='encode_oasis-3.py')
+    parser.add_argument('--encoded_dir', required=True, type=str)
+    parser.add_argument('--encoder', required=True, type=str, choices=['ViT-B/16', 'ConvNeXt-Tiny', 'MedSAM', '3DINO'])
+    parser.add_argument('--numpy_dir', required=True, type=str)
+    parser.add_argument('--seed', default=42, type=int)
+    parser.add_argument('--n_last_blocks', default=4, type=int)
+    parser.add_argument('--avgpool', action='store_true', default=False)
+    parser.add_argument('--pretrained_weights', default=None, type=str)
+    parser.add_argument('--hf_download', action='store_true', default=False)
     args = parser.parse_args()
-    
+
     os.makedirs(args.encoded_dir, exist_ok=True)
 
+    # --- Data splitting (patient-level) ---
     labels_df = pd.read_csv(f'{args.numpy_dir}/labels.csv')
 
-    grouped_df = labels_df.groupby('Subject')['Alzheimer\'s'].agg(lambda x: x.mode()[0]).reset_index()
-    ids, id_labels = grouped_df['Subject'], grouped_df['Alzheimer\'s']
-    train_and_val_ids, test_ids, train_and_val_id_labels, test_id_labels = train_test_split(ids, id_labels, test_size=1/6, random_state=args.seed, stratify=id_labels)
+    grouped_df = labels_df.groupby('Subject')["Alzheimer's"].agg(lambda x: x.mode()[0]).reset_index()
+    ids, id_labels = grouped_df['Subject'], grouped_df["Alzheimer's"]
+    train_and_val_ids, test_ids, train_and_val_id_labels, _ = train_test_split(ids, id_labels, test_size=1/6, random_state=args.seed, stratify=id_labels)
     train_ids, val_ids = train_test_split(train_and_val_ids, test_size=1/5, random_state=args.seed, stratify=train_and_val_id_labels)
-    
+
     train_df = labels_df[labels_df['Subject'].isin(train_ids)]
     val_df = labels_df[labels_df['Subject'].isin(val_ids)]
     test_df = labels_df[labels_df['Subject'].isin(test_ids)]
-    
-    assert args.encoder in ['ViT-B/16', 'ConvNeXt-Tiny', 'MedSAM', '3DINO']
+
+    # --- Model ---
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     print(device)
 
     if args.encoder == 'ViT-B/16':
-        weights = torchvision.models.ViT_B_16_Weights.DEFAULT
-        model = torchvision.models.vit_b_16(weights=torchvision.models.ViT_B_16_Weights(weights))
+        model = torchvision.models.vit_b_16(weights=torchvision.models.ViT_B_16_Weights.DEFAULT)
         model.conv_proj.weight.data = model.conv_proj.weight.data.sum(dim=1, keepdim=True)
         model.conv_proj.in_channels = 1
         model.heads = torch.nn.Identity()
     elif args.encoder == 'ConvNeXt-Tiny':
-        weights = torchvision.models.ConvNeXt_Tiny_Weights.IMAGENET1K_V1
-        model = torchvision.models.convnext_tiny(weights=torchvision.models.ConvNeXt_Tiny_Weights(weights))
+        model = torchvision.models.convnext_tiny(weights=torchvision.models.ConvNeXt_Tiny_Weights.IMAGENET1K_V1)
         model.features[0][0].weight.data = model.features[0][0].weight.data.sum(dim=1, keepdim=True)
         model.features[0][0].in_channels = 1
         model.classifier[2] = torch.nn.Identity()
     elif args.encoder == 'MedSAM':
         from segment_anything import sam_model_registry
-        checkpoint_path = '/cluster/tufts/hugheslab/eharve06/pooling/models/medsam_vit_b.pth'
-        checkpoint = torch.load(checkpoint_path, map_location=torch.device('cpu'), weights_only=False)
+        checkpoint = torch.load('/cluster/tufts/hugheslab/eharve06/pooling/models/medsam_vit_b.pth', map_location='cpu', weights_only=False)
         medsam = sam_model_registry['vit_b']()
         medsam.load_state_dict(checkpoint)
         model = medsam.image_encoder
@@ -100,20 +68,13 @@ if __name__ == '__main__':
 
     model.to(device)
 
+    # --- Build encode function ---
     if args.encoder == '3DINO':
-        # 3DINO encodes whole 3D volumes (length=1 per subject)
-        for split_name, split_df in [('train', train_df), ('val', val_df), ('test', test_df)]:
-            X, lengths, y = [], [], []
-            for _, row in split_df.iterrows():
-                volumes = utils.load_and_resample_volume(row['path'])
-                embedding = torch.cat([utils.encode_image_3dino(model, v, device, args.n_last_blocks, args.avgpool) for v in volumes], dim=-1)
-                X.append(embedding)
-                lengths.append(1)
-                y.append(torch.tensor([row["Alzheimer's"]], dtype=torch.float32))
-            torch.save({'X': torch.cat(X), 'lengths': tuple(lengths), 'y': torch.stack(y)}, f'{args.encoded_dir}/{split_name}.pth')
-            print(f"{split_name}: {torch.cat(X).shape}")
+        def encode_fn(path):
+            volumes = utils.load_and_resample_volume(path)
+            embedding = torch.cat([utils.encode_image_3dino(model, v, device, args.n_last_blocks, args.avgpool) for v in volumes], dim=-1)
+            return embedding, 1
     else:
-        # 2D encoders: slice-level encoding with mean/std normalization
         resize_size = 1024 if args.encoder == 'MedSAM' else 224
         transform = torchvision.transforms.Compose([
             lambda path: utils.read_npz(path),
@@ -123,10 +84,10 @@ if __name__ == '__main__':
             lambda image: torch.rot90(image, k=1, dims=[-2, -1]),
         ])
 
-        train_dataset = datasets.MILPathDataset(train_df.path.values, torch.tensor(train_df[['Alzheimer\'s']].values, dtype=torch.float32), transform)
-
+        # Compute mean/std from training set
+        train_dataset = datasets.MILPathDataset(train_df.path.values, torch.tensor(train_df[["Alzheimer's"]].values, dtype=torch.float32), transform)
         means, stds = [], []
-        for image, num_slices, label in train_dataset:
+        for image, _, _ in train_dataset:
             means.append(torch.mean(image, dim=(0, 2, 3)).tolist())
             stds.append(torch.std(image, dim=(0, 2, 3)).tolist())
         mean = torch.tensor(means).mean(dim=0)
@@ -141,19 +102,18 @@ if __name__ == '__main__':
             lambda image: (image - mean.view(1, -1, 1, 1)) / std.view(1, -1, 1, 1),
         ])
 
-        train_dataset = datasets.MILPathDataset(train_df.path.values, torch.tensor(train_df[['Alzheimer\'s']].values, dtype=torch.float32), transform)
-        val_dataset = datasets.MILPathDataset(val_df.path.values, torch.tensor(val_df[['Alzheimer\'s']].values, dtype=torch.float32), transform)
-        test_dataset = datasets.MILPathDataset(test_df.path.values, torch.tensor(test_df[['Alzheimer\'s']].values, dtype=torch.float32), transform)
+        def encode_fn(path):
+            image = transform(path)
+            embeddings = torch.cat([utils.encode_image(model, image[:, c].unsqueeze(1)) for c in range(image.shape[1])], dim=-1)
+            return embeddings, len(image)
 
-        for split_name, split_dataset in [('train', train_dataset), ('val', val_dataset), ('test', test_dataset)]:
-            X, lengths, y = [], [], []
-            for image, length, label in split_dataset:
-                embeddings = torch.cat([
-                    utils.encode_image(model, image[:,c].unsqueeze(1))
-                    for c in range(image.shape[1])
-                ], dim=-1)
-                X.append(embeddings)
-                lengths.append(length)
-                y.append(label)
-            torch.save({'X': torch.cat(X), 'lengths': tuple(lengths), 'y': torch.stack(y)}, f'{args.encoded_dir}/{split_name}.pth')
-            print(f"{split_name}: {torch.cat(X).shape}")
+    # --- Encode all splits ---
+    for split_name, split_df in [('train', train_df), ('val', val_df), ('test', test_df)]:
+        x, lengths, y = [], [], []
+        for _, row in split_df.iterrows():
+            embedding, length = encode_fn(row['path'])
+            x.append(embedding)
+            lengths.append(length)
+            y.append(torch.tensor([row["Alzheimer's"]], dtype=torch.float32))
+        torch.save({'X': torch.cat(x), 'lengths': tuple(lengths), 'y': torch.stack(y)}, f'{args.encoded_dir}/{split_name}.pth')
+        print(f"{split_name}: {torch.cat(x).shape}")
