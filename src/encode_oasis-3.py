@@ -46,6 +46,11 @@ if __name__ == '__main__':
     parser.add_argument('--encoder', help='Encoder pre-trained on ImageNet', type=str)
     parser.add_argument('--numpy_dir', help='Directory to numpy dataset', type=str)
     parser.add_argument('--seed', default=42, help='Random seed (default: 42)', type=int)
+    # 3DINO-specific args
+    parser.add_argument('--n_last_blocks', default=4, type=int, help='CLS tokens from last N blocks (3DINO)')
+    parser.add_argument('--avgpool', action='store_true', default=False, help='Append avg-pooled patch tokens (3DINO)')
+    parser.add_argument('--pretrained_weights', default=None, type=str, help='Path to 3DINO weights')
+    parser.add_argument('--hf_download', action='store_true', default=False, help='Download 3DINO weights from HuggingFace')
     args = parser.parse_args()
     
     os.makedirs(args.encoded_dir, exist_ok=True)
@@ -61,40 +66,10 @@ if __name__ == '__main__':
     val_df = labels_df[labels_df['Subject'].isin(val_ids)]
     test_df = labels_df[labels_df['Subject'].isin(test_ids)]
     
-    # TODO: Make resize size an argument
-    transform = torchvision.transforms.Compose([
-        lambda path: utils.read_npz(path),
-        lambda image: image.permute(3, 0, 1, 2),
-        lambda image: utils.pad_image(image),
-        torchvision.transforms.Resize(size=(1024, 1024)),
-        lambda image: torch.rot90(image, k=1, dims=[-2, -1]),
-    ])
+    assert args.encoder in ['ViT-B/16', 'ConvNeXt-Tiny', 'MedSAM', '3DINO']
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    print(device)
 
-    train_dataset = datasets.MILPathDataset(train_df.path.values, torch.tensor(train_df[['Alzheimer\'s']].values, dtype=torch.float32), transform)
-    
-    means, stds = [], []
-
-    for image, num_slices, label in train_dataset:
-        means.append(torch.mean(image, dim=(0, 2, 3)).tolist())
-        stds.append(torch.std(image, dim=(0, 2, 3)).tolist())
-
-    mean = torch.tensor(means).mean(dim=0)
-    std = torch.tensor(stds).mean(dim=0)
-
-    transform = torchvision.transforms.Compose([
-        lambda path: utils.read_npz(path),
-        lambda image: image.permute(3, 0, 1, 2),
-        lambda image: utils.pad_image(image),
-        lambda image: torch.rot90(image, k=1, dims=[-2, -1]),
-        torchvision.transforms.Resize(size=(1024, 1024)),
-        lambda image: (image - mean.view(1, -1, 1, 1)) / std.view(1, -1, 1, 1),
-    ])
-
-    train_dataset = datasets.MILPathDataset(train_df.path.values, torch.tensor(train_df[['Alzheimer\'s']].values, dtype=torch.float32), transform)
-    val_dataset = datasets.MILPathDataset(val_df.path.values, torch.tensor(val_df[['Alzheimer\'s']].values, dtype=torch.float32), transform)
-    test_dataset = datasets.MILPathDataset(test_df.path.values, torch.tensor(test_df[['Alzheimer\'s']].values, dtype=torch.float32), transform)
-    
-    assert args.encoder in ['ViT-B/16', 'ConvNeXt-Tiny', 'MedSAM']
     if args.encoder == 'ViT-B/16':
         weights = torchvision.models.ViT_B_16_Weights.DEFAULT
         model = torchvision.models.vit_b_16(weights=torchvision.models.ViT_B_16_Weights(weights))
@@ -116,95 +91,69 @@ if __name__ == '__main__':
         model = medsam.image_encoder
         model.patch_embed.proj.weight.data = model.patch_embed.proj.weight.data.sum(dim=1, keepdim=True)
         model.patch_embed.proj.in_channels = 1
-        #model.neck.extend([
-        #    torch.nn.AdaptiveAvgPool2d(output_size=(1, 1)),
-        #    Squeeze(dim=(2, 3)),
-        #])
-        model.neck = torch.nn.Sequential(
-            torch.nn.AdaptiveAvgPool2d(output_size=(1, 1)),
-            Squeeze(dim=(2, 3)),
-        )
-        
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-    print(device)
-    model.to(device)
-    
-    X, lengths, y = [], [], []
-    
-    for image, length, label in train_dataset:
-        
-        #embeddings = torch.cat([
-        #    utils.encode_image(model, image[:,c].unsqueeze(1)) 
-        #    for c in range(image.shape[1])
-        #], dim=-1)
-        embeddings = torch.cat([
-            torch.cat([
-                utils.encode_image(model, image[s:s+5,c].unsqueeze(1))
-                for s in range(0, image.shape[0], 5)
-            ], dim=0)
-            for c in range(image.shape[1])
-        ], dim=-1)
-        print(embeddings.shape)
+        model.neck.append(torch.nn.AdaptiveAvgPool2d(output_size=(1, 1)))
+    elif args.encoder == '3DINO':
+        if args.hf_download:
+            from huggingface_hub import hf_hub_download
+            args.pretrained_weights = hf_hub_download(repo_id="AICONSlab/3DINO-ViT", filename="3dino_vit_weights.pth")
+        model = utils.load_3dino_model(args.pretrained_weights)
 
-        X.append(embeddings)
-        lengths.append(length)
-        y.append(label)
-        
-    torch.save({
-        'X': torch.cat(X),
-        'lengths': tuple(lengths),
-        'y': torch.stack(y),
-    }, f'{args.encoded_dir}/train.pth')
-        
-    X, lengths, y = [], [], []
-    
-    for image, length, label in val_dataset:
-        
-        #embeddings = torch.cat([
-        #    utils.encode_image(model, image[:,c].unsqueeze(1)) 
-        #    for c in range(image.shape[1])
-        #], dim=-1)
-        embeddings = torch.cat([
-            torch.cat([
-                utils.encode_image(model, image[s:s+5,c].unsqueeze(1))
-                for s in range(0, image.shape[0], 5)
-            ], dim=0)
-            for c in range(image.shape[1])
-        ], dim=-1)
-        
-        X.append(embeddings)
-        lengths.append(length)
-        y.append(label)
-        
-    torch.save({
-        'X': torch.cat(X),
-        'lengths': tuple(lengths),
-        'y': torch.stack(y),
-    }, f'{args.encoded_dir}/val.pth')
-    
-    X, lengths, y = [], [], []
-    
-    for image, length, label in test_dataset:
-        
-        #embeddings = torch.cat([
-        #    utils.encode_image(model, image[:,c].unsqueeze(1)) 
-        #    for c in range(image.shape[1])
-        #], dim=-1)
-        embeddings = torch.cat([
-            torch.cat([
-                utils.encode_image(model, image[s:s+5,c].unsqueeze(1))
-                for s in range(0, image.shape[0], 5)
-            ], dim=0)
-            for c in range(image.shape[1])
-        ], dim=-1)
-        
-        X.append(embeddings)
-        lengths.append(length)
-        y.append(label)
-        
-    torch.save({
-        'X': torch.cat(X),
-        'lengths': tuple(lengths),
-        'y': torch.stack(y),
-    }, f'{args.encoded_dir}/test.pth')
-    
+    model.to(device)
+
+    if args.encoder == '3DINO':
+        # 3DINO encodes whole 3D volumes (length=1 per subject)
+        for split_name, split_df in [('train', train_df), ('val', val_df), ('test', test_df)]:
+            X, lengths, y = [], [], []
+            for _, row in split_df.iterrows():
+                volumes = utils.load_and_resample_volume(row['path'])
+                embedding = torch.cat([utils.encode_image_3dino(model, v, device, args.n_last_blocks, args.avgpool) for v in volumes], dim=-1)
+                X.append(embedding)
+                lengths.append(1)
+                y.append(torch.tensor([row["Alzheimer's"]], dtype=torch.float32))
+            torch.save({'X': torch.cat(X), 'lengths': tuple(lengths), 'y': torch.stack(y)}, f'{args.encoded_dir}/{split_name}.pth')
+            print(f"{split_name}: {torch.cat(X).shape}")
+    else:
+        # 2D encoders: slice-level encoding with mean/std normalization
+        resize_size = 1024 if args.encoder == 'MedSAM' else 224
+        transform = torchvision.transforms.Compose([
+            lambda path: utils.read_npz(path),
+            lambda image: image.permute(3, 0, 1, 2),
+            lambda image: utils.pad_image(image),
+            torchvision.transforms.Resize(size=(resize_size, resize_size)),
+            lambda image: torch.rot90(image, k=1, dims=[-2, -1]),
+        ])
+
+        train_dataset = datasets.MILPathDataset(train_df.path.values, torch.tensor(train_df[['Alzheimer\'s']].values, dtype=torch.float32), transform)
+
+        means, stds = [], []
+        for image, num_slices, label in train_dataset:
+            means.append(torch.mean(image, dim=(0, 2, 3)).tolist())
+            stds.append(torch.std(image, dim=(0, 2, 3)).tolist())
+        mean = torch.tensor(means).mean(dim=0)
+        std = torch.tensor(stds).mean(dim=0)
+
+        transform = torchvision.transforms.Compose([
+            lambda path: utils.read_npz(path),
+            lambda image: image.permute(3, 0, 1, 2),
+            lambda image: utils.pad_image(image),
+            lambda image: torch.rot90(image, k=1, dims=[-2, -1]),
+            torchvision.transforms.Resize(size=(resize_size, resize_size)),
+            lambda image: (image - mean.view(1, -1, 1, 1)) / std.view(1, -1, 1, 1),
+        ])
+
+        train_dataset = datasets.MILPathDataset(train_df.path.values, torch.tensor(train_df[['Alzheimer\'s']].values, dtype=torch.float32), transform)
+        val_dataset = datasets.MILPathDataset(val_df.path.values, torch.tensor(val_df[['Alzheimer\'s']].values, dtype=torch.float32), transform)
+        test_dataset = datasets.MILPathDataset(test_df.path.values, torch.tensor(test_df[['Alzheimer\'s']].values, dtype=torch.float32), transform)
+
+        for split_name, split_dataset in [('train', train_dataset), ('val', val_dataset), ('test', test_dataset)]:
+            X, lengths, y = [], [], []
+            for image, length, label in split_dataset:
+                embeddings = torch.cat([
+                    utils.encode_image(model, image[:,c].unsqueeze(1))
+                    for c in range(image.shape[1])
+                ], dim=-1)
+                X.append(embeddings)
+                lengths.append(length)
+                y.append(label)
+            torch.save({'X': torch.cat(X), 'lengths': tuple(lengths), 'y': torch.stack(y)}, f'{args.encoded_dir}/{split_name}.pth')
+            print(f"{split_name}: {torch.cat(X).shape}")

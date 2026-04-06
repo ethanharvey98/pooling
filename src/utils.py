@@ -1,7 +1,11 @@
 import math
+import os
+import sys
+
 import numpy as np
 from sklearn.metrics import average_precision_score, balanced_accuracy_score, roc_auc_score
 import torch
+import torch.nn.functional as F
 
 def inv_sigmoid(x):
     return torch.log(x / (1 - x))
@@ -50,6 +54,88 @@ def encode_image(model, image):
             encoded_image = encoded_image.cpu()
             
     return encoded_image
+
+def load_3dino_model(pretrained_weights, dino_repo_path=None):
+    """Load 3DINO ViT-Large teacher model.
+
+    Args:
+        pretrained_weights: Path to 3dino_vit_weights.pth
+        dino_repo_path: Path to 3DINO repo (defaults to ../../3DINO relative to this file)
+    """
+    if dino_repo_path is None:
+        dino_repo_path = '/cluster/tufts/hugheslab/dloevl01/DINO3_Experiments/3DINO'
+    sys.path.insert(0, dino_repo_path)
+
+    from dinov2.configs import load_and_merge_config_3d
+    from dinov2.models import build_model_from_cfg
+    import dinov2.utils.utils as dinov2_utils
+
+    cfg = load_and_merge_config_3d('train/vit3d_highres')
+    model, _ = build_model_from_cfg(cfg, only_teacher=True)
+    dinov2_utils.load_pretrained_weights(model, pretrained_weights, "teacher")
+    model.eval()
+    return model
+
+
+def normalize_volume_3dino(volume):
+    """Percentile-based normalization to [-1, 1] (3DINO: 0.05th to 99.95th percentile)."""
+    min_val = torch.quantile(volume.float(), 0.0005)
+    max_val = torch.quantile(volume.float(), 0.9995)
+    volume = (volume - min_val) / (max_val - min_val + 1e-8)
+    volume = torch.clip(volume * 2 - 1, -1, 1)
+    return volume
+
+
+def load_and_resample_volume(path, target_size=(112, 112, 112)):
+    """Load .npz and resample to target size. Returns list of (1,1,D,H,W) volumes, one per channel."""
+    data = np.load(path)
+    arr = data['arr_0']  # (C, H, W, D) or (H, W, D)
+
+    if arr.ndim == 4:
+        channels = [arr[c] for c in range(arr.shape[0])]
+    else:
+        channels = [arr]
+
+    volumes = []
+    for ch in channels:
+        volume = torch.as_tensor(ch, dtype=torch.float32)
+        volume = volume.unsqueeze(0).unsqueeze(0)  # (1, 1, H, W, D)
+        volume = torch.rot90(volume, k=1, dims=[2, 3])  # match RAS orientation
+        volume = F.interpolate(volume, size=target_size, mode='trilinear', align_corners=False)
+        volume = normalize_volume_3dino(volume)
+        volumes.append(volume)
+    return volumes
+
+
+def create_linear_input_3dino(x_tokens_list, use_n_blocks, use_avgpool):
+    """Construct features from intermediate layers (matches 3DINO eval/linear3d.py).
+
+    Concatenates CLS tokens from last N blocks, optionally appends
+    mean-pooled patch tokens from the final block.
+    """
+    intermediate_output = x_tokens_list[-use_n_blocks:]
+    output = torch.cat([class_token for _, class_token in intermediate_output], dim=-1)
+    if use_avgpool:
+        output = torch.cat(
+            (output, torch.mean(intermediate_output[-1][0], dim=1)),
+            dim=-1,
+        )
+        output = output.reshape(output.shape[0], -1)
+    return output.float()
+
+
+def encode_image_3dino(model, volume, device, n_last_blocks=4, avgpool=True):
+    """Encode a single (1, 1, D, H, W) volume with 3DINO and return its embedding."""
+    volume = volume.to(device)
+    with torch.no_grad():
+        if n_last_blocks > 1 or avgpool:
+            features = model.get_intermediate_layers(
+                volume, n_last_blocks, return_class_token=True
+            )
+            return create_linear_input_3dino(features, n_last_blocks, avgpool).cpu()
+        else:
+            return model(volume).cpu()
+
 
 def train_one_epoch(model, criterion, optimizer, dataloader, lr_scheduler=None):
 
