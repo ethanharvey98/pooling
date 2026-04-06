@@ -87,7 +87,7 @@ def normalize_volume_3dino(volume):
 
 
 def load_and_resample_volume(path, target_size=(112, 112, 112)):
-    """Load .npz and resample to target size. Returns list of (1,1,D,H,W) volumes, one per channel."""
+    """Load .npz and resample to target size. Returns list of (1,1,H,W,D) volumes, one per channel."""
     data = np.load(path)
     arr = data['arr_0']  # (C, H, W, D) or (H, W, D)
 
