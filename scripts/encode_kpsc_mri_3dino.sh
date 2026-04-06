@@ -15,7 +15,6 @@ WEIGHTS="/cluster/tufts/hugheslab/dloevl01/DINO3_Experiments/pooling/envs/dino3/
 NUMPY_DIR="/cluster/tufts/hugheslabkp/data_irb_required/KPSC_MRI_800_numpy"
 ENC_BASE="/cluster/tufts/hugheslabkp/data_irb_required/encoded_KPSC_MRI_800/3DINO_ViT_concat_T1T2"
 
-# 5 site-based splits
 experiments=(
     "python ../src/encode_kpsc_3dino.py --encoded_dir=${ENC_BASE}/test_site_ids=9_train_site_ids=1_2_3_4_6_7_8_10_11_val_site_ids=5 --numpy_dir=${NUMPY_DIR} --pretrained_weights=${WEIGHTS} --n_last_blocks=4 --avgpool --test_site_ids 9 --train_site_ids 1 2 3 4 6 7 8 10 11 --val_site_ids 5"
     "python ../src/encode_kpsc_3dino.py --encoded_dir=${ENC_BASE}/test_site_ids=1_4_7_10_11_train_site_ids=2_3_5_6_8_val_site_ids=9 --numpy_dir=${NUMPY_DIR} --pretrained_weights=${WEIGHTS} --n_last_blocks=4 --avgpool --test_site_ids 1 4 7 10 11 --train_site_ids 2 3 5 6 8 --val_site_ids 9"

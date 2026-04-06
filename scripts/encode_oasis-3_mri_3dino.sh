@@ -14,7 +14,6 @@ conda activate /cluster/tufts/hugheslab/dloevl01/DINO3_Experiments/pooling/envs/
 seeds=(1001 2001 3001)
 seed=${seeds[$SLURM_ARRAY_TASK_ID]}
 
-# Set this to the cached weights path (find with: find ~/.cache/huggingface -name "3dino_vit_weights.pth")
 WEIGHTS="/cluster/tufts/hugheslab/dloevl01/DINO3_Experiments/pooling/envs/dino3/3dino_vit_weights.pth"
 
 python ../src/encode_oasis-3_3dino.py \
