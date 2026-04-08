@@ -1,161 +1,92 @@
 import argparse
 import os
-import sys
-
-import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 import torch
-import torch.nn.functional as F
+import matplotlib.pyplot as plt
+import utils
 
-# Add 3DINO to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '3DINO'))
-
-# 4-block concat + avgpool (as recommended by 3DINO paper):
-# python ../src/encode_adni1_3dino.py --encoded_dir='/cluster/tufts/hugheslab/eharve06/encoded_ADNI1_Complete_1Yr_1.5T/3DINO_ViT_concat/seed=1001' --numpy_dir='/cluster/tufts/hugheslab/datasets/ADNI1_Complete_1Yr_1.5T_numpy' --hf_download --seed=1001 --n_last_blocks=4 --avgpool
-# python ../src/encode_adni1_3dino.py --encoded_dir='/cluster/tufts/hugheslab/eharve06/encoded_ADNI1_Complete_1Yr_1.5T/3DINO_ViT_concat/seed=2001' --numpy_dir='/cluster/tufts/hugheslab/datasets/ADNI1_Complete_1Yr_1.5T_numpy' --hf_download --seed=2001 --n_last_blocks=4 --avgpool
-# python ../src/encode_adni1_3dino.py --encoded_dir='/cluster/tufts/hugheslab/eharve06/encoded_ADNI1_Complete_1Yr_1.5T/3DINO_ViT_concat/seed=3001' --numpy_dir='/cluster/tufts/hugheslab/datasets/ADNI1_Complete_1Yr_1.5T_numpy' --hf_download --seed=3001 --n_last_blocks=4 --avgpool
-
-
-def load_3dino_model(pretrained_weights):
-    from dinov2.configs import load_and_merge_config_3d
-    from dinov2.models import build_model_from_cfg
-    import dinov2.utils.utils as dinov2_utils
-
-    cfg = load_and_merge_config_3d('train/vit3d_highres')
-    model, _ = build_model_from_cfg(cfg, only_teacher=True)
-    dinov2_utils.load_pretrained_weights(model, pretrained_weights, "teacher")
-    model.eval()
-    return model
-
-
-def normalize_volume(volume):
-    min_val = torch.quantile(volume.float(), 0.0005)
-    max_val = torch.quantile(volume.float(), 0.9995)
-    volume = (volume - min_val) / (max_val - min_val + 1e-8)
-    volume = torch.clip(volume * 2 - 1, -1, 1)
-    return volume
-
-
-def load_and_resample_volume(path, target_size=(112, 112, 112)):
-    data = np.load(path)
-    arr = data['arr_0']
-
-    if arr.ndim == 4:
-        channels = [arr[c] for c in range(arr.shape[0])]
-    else:
-        channels = [arr]
-
-    volumes = []
-    for ch in channels:
-        volume = torch.as_tensor(ch, dtype=torch.float32)
-        volume = volume.unsqueeze(0).unsqueeze(0)
-        volume = F.interpolate(volume, size=target_size, mode='trilinear', align_corners=False)
-        volume = normalize_volume(volume)
-        volumes.append(volume)
-    return volumes
-
-
-def create_linear_input(x_tokens_list, use_n_blocks, use_avgpool):
-    intermediate_output = x_tokens_list[-use_n_blocks:]
-    output = torch.cat([class_token for _, class_token in intermediate_output], dim=-1)
-    if use_avgpool:
-        output = torch.cat(
-            (output, torch.mean(intermediate_output[-1][0], dim=1)),
-            dim=-1,
-        )
-        output = output.reshape(output.shape[0], -1)
-    return output.float()
-
-
-def encode_volume(model, volume, device, n_last_blocks, avgpool):
-    volume = volume.to(device)
-    with torch.no_grad():
-        if n_last_blocks > 1 or avgpool:
-            features = model.get_intermediate_layers(
-                volume, n_last_blocks, return_class_token=True
-            )
-            return create_linear_input(features, n_last_blocks, avgpool)
-        else:
-            return model(volume)
-
-
-def encode_split(model, df, device, n_last_blocks, avgpool):
-    X, lengths, y = [], [], []
-
-    for i, row in df.iterrows():
-        volumes = load_and_resample_volume(row['path'])
-
-        channel_embeddings = []
-        for volume in volumes:
-            emb = encode_volume(model, volume, device, n_last_blocks, avgpool)
-            channel_embeddings.append(emb)
-
-        embedding = torch.cat(channel_embeddings, dim=-1)
-
-        X.append(embedding.cpu())
-        lengths.append(1)
-        y.append(torch.tensor([row["Alzheimer's"]], dtype=torch.float32))
-
-        if len(X) % 50 == 0:
-            print(f"  Encoded {len(X)}/{len(df)} volumes")
-
-    print(f"  Encoded {len(X)}/{len(df)} volumes (done)")
-    return torch.cat(X), tuple(lengths), torch.stack(y)
-
+# python ../src/encode_adni1_3dino.py --encoded_dir='...' --numpy_dir='/cluster/tufts/hugheslab/datasets/ADNI1_Complete_1Yr_1.5T_numpy' --seed=1001 --avgpool --pretrained_weights=/path/to/3dino_vit_weights.pth
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Encode ADNI1 volumes with 3DINO ViT.')
-    parser.add_argument('--encoded_dir', help='Directory to save encoded dataset', type=str, required=True)
-    parser.add_argument('--numpy_dir', help='Directory to numpy dataset', type=str, required=True)
-    parser.add_argument('--pretrained_weights', help='Path to 3DINO pretrained weights', type=str, default=None)
-    parser.add_argument('--hf_download', action='store_true', default=False)
+    parser = argparse.ArgumentParser(description='Encode ADNI1 volumes with 3DINO.')
+    parser.add_argument('--encoded_dir', required=True, type=str)
+    parser.add_argument('--numpy_dir', required=True, type=str)
     parser.add_argument('--seed', default=42, type=int)
-    parser.add_argument('--n_last_blocks', default=1, type=int)
+    parser.add_argument('--n_last_blocks', default=4, type=int)
     parser.add_argument('--avgpool', action='store_true', default=False)
+    parser.add_argument('--pretrained_weights', default=None, type=str)
+    parser.add_argument('--hf_download', action='store_true', default=False)
     args = parser.parse_args()
 
     os.makedirs(args.encoded_dir, exist_ok=True)
+    os.makedirs(f'{args.encoded_dir}/slices', exist_ok=True)
 
+    # --- Resolve weights ---
     if args.hf_download:
         from huggingface_hub import hf_hub_download
-        args.pretrained_weights = hf_hub_download(
-            repo_id="AICONSlab/3DINO-ViT",
-            filename="3dino_vit_weights.pth",
-        )
-        print(f"Downloaded weights to: {args.pretrained_weights}")
+        args.pretrained_weights = hf_hub_download(repo_id="AICONSlab/3DINO-ViT", filename="3dino_vit_weights.pth")
     assert args.pretrained_weights is not None, "Provide --pretrained_weights or --hf_download"
 
+    # --- Patient-level split ---
     labels_df = pd.read_csv(f'{args.numpy_dir}/labels.csv')
 
     grouped_df = labels_df.groupby('Subject')["Alzheimer's"].agg(lambda x: x.mode()[0]).reset_index()
     ids, id_labels = grouped_df['Subject'], grouped_df["Alzheimer's"]
-    train_and_val_ids, test_ids, train_and_val_id_labels, _ = train_test_split(
-        ids, id_labels, test_size=1/6, random_state=args.seed, stratify=id_labels
-    )
-    train_ids, val_ids = train_test_split(
-        train_and_val_ids, test_size=1/5, random_state=args.seed, stratify=train_and_val_id_labels
-    )
+    train_and_val_ids, test_ids, train_and_val_id_labels, _ = train_test_split(ids, id_labels, test_size=1/6, random_state=args.seed, stratify=id_labels)
+    train_ids, val_ids = train_test_split(train_and_val_ids, test_size=1/5, random_state=args.seed, stratify=train_and_val_id_labels)
 
     train_df = labels_df[labels_df['Subject'].isin(train_ids)]
     val_df = labels_df[labels_df['Subject'].isin(val_ids)]
     test_df = labels_df[labels_df['Subject'].isin(test_ids)]
 
-    print(f"Split sizes: train={len(train_df)}, val={len(val_df)}, test={len(test_df)}")
+    print(f"Split: train={len(train_df)}, val={len(val_df)}, test={len(test_df)}")
 
+    # --- Load model ---
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     print(f"Device: {device}")
 
-    model = load_3dino_model(args.pretrained_weights)
+    model = utils.load_3dino_model(args.pretrained_weights)
     model.to(device)
 
-    embed_dim = model.embed_dim
-    per_channel_dim = embed_dim * args.n_last_blocks + (embed_dim if args.avgpool else 0)
-    print(f"3DINO ViT-Large loaded. n_last_blocks={args.n_last_blocks}, avgpool={args.avgpool}, per_channel_dim={per_channel_dim}")
+    per_channel_dim = model.embed_dim * args.n_last_blocks + (model.embed_dim if args.avgpool else 0)
+    print(f"n_last_blocks={args.n_last_blocks}, avgpool={args.avgpool}, per_channel_dim={per_channel_dim}")
 
+    # --- Encode ---
+    saved_slices = False
     for split_name, split_df in [('train', train_df), ('val', val_df), ('test', test_df)]:
-        print(f"\nEncoding {split_name} split ({len(split_df)} volumes)...")
-        X, lengths, y = encode_split(model, split_df, device, args.n_last_blocks, args.avgpool)
-        save_path = f'{args.encoded_dir}/{split_name}.pth'
-        torch.save({'X': X, 'lengths': lengths, 'y': y}, save_path)
-        print(f"Saved {save_path}: X={X.shape}, y={y.shape}")
+        X, lengths, y = [], [], []
+
+        for _, row in split_df.iterrows():
+            volumes = utils.load_and_resample_volume(row['path'])
+            embedding = torch.cat([
+                utils.encode_image_3dino(model, v, device, args.n_last_blocks, args.avgpool)
+                for v in volumes
+            ], dim=-1)
+
+            X.append(embedding)
+            lengths.append(1)
+            y.append(torch.tensor([row["Alzheimer's"]], dtype=torch.float32))
+
+            # Save axial slices for the first volume to verify orientation
+            if not saved_slices:
+                vol = volumes[0][0, 0]  # (H, W, D)
+                n_slices = vol.shape[-1]
+                indices = [int(i) for i in torch.linspace(0, n_slices - 1, 12)]
+                fig, axes = plt.subplots(1, len(indices), figsize=(2 * len(indices), 2))
+                for i, idx in enumerate(indices):
+                    axes[i].imshow(vol[:, :, idx].numpy(), cmap='gray')
+                    axes[i].set_title(f'D={idx}', fontsize=8)
+                    axes[i].axis('off')
+                fig.suptitle('Axial slices fed to 3DINO (D=0 inferior -> superior)', fontsize=10)
+                fig.tight_layout()
+                fig.savefig(f'{args.encoded_dir}/slices/axial_orientation.png', dpi=150, bbox_inches='tight')
+                plt.close(fig)
+                print(f"Saved orientation check: {args.encoded_dir}/slices/axial_orientation.png")
+                saved_slices = True
+
+            if len(X) % 50 == 0:
+                print(f"  {split_name}: {len(X)}/{len(split_df)}")
+
+        torch.save({'X': torch.cat(X), 'lengths': tuple(lengths), 'y': torch.stack(y)}, f'{args.encoded_dir}/{split_name}.pth')
+        print(f"{split_name}: {torch.cat(X).shape}")
