@@ -10,6 +10,18 @@ import datasets
 import models
 
 
+class CenterGaussian(torch.nn.Module):
+    """Baseline that assigns Gaussian attention centered at the middle of each bag."""
+    def forward(self, x, lengths):
+        attn_weights = []
+        for x_i in torch.split(x, lengths):
+            n = len(x_i)
+            pos = torch.linspace(1, n - 1, n)
+            w = torch.exp(-0.5 * ((pos - n / 2) / 1.0) ** 2)
+            attn_weights.append((w / w.sum()).unsqueeze(1))
+        return torch.zeros(len(lengths), 1), torch.cat(attn_weights)
+
+
 def parse_path(path):
     """Extract experiment params from the HPC path convention."""
     path = path.replace('.pt', '')
@@ -54,9 +66,14 @@ def evaluate_instance_metrics(model, dataset):
 
 
 if __name__ == '__main__':
+    from collections import defaultdict
+
     parser = argparse.ArgumentParser(description='Instance-level metrics for synthetic MIL models')
     parser.add_argument('paths', nargs='+', help='Model .pt checkpoint paths')
+    parser.add_argument('--center-gaussian', action='store_true', help='Evaluate center Gaussian baseline instead of loading checkpoints')
     args = parser.parse_args()
+
+    grouped = defaultdict(lambda: {'auroc': [], 'auprc': [], 'attn_mass': []})
 
     for path in args.paths:
         params, pooling = parse_path(path)
@@ -65,13 +82,24 @@ if __name__ == '__main__':
             s_low=params['s_low'], s_high=params['s_high'],
             seed=params['data_seed_test'],
         )
-        model = models.PoolClf(
-            in_features=768, out_features=1, pooling=pooling,
-            neighbors=params.get('neighbors', 1),
-        )
-        model.load_state_dict(torch.load(path, map_location='cpu', weights_only=False))
+        if args.center_gaussian:
+            model = CenterGaussian()
+            key = 'CenterGaussian'
+        else:
+            model = models.PoolClf(
+                in_features=768, out_features=1, pooling=pooling,
+                neighbors=params.get('neighbors', 1),
+            )
+            model.load_state_dict(torch.load(path, map_location='cpu', weights_only=False))
+            key = pooling
         results = evaluate_instance_metrics(model, test_dataset)
-        print(f"{path}")
-        print(f"  Instance AUROC: {results['auroc']:.4f}")
-        print(f"  Instance AUPRC: {results['auprc']:.4f}")
-        print(f"  Attn mass on positives: {results['attn_mass']:.4f}")
+        grouped[key]['auroc'].append(results['auroc'])
+        grouped[key]['auprc'].append(results['auprc'])
+        grouped[key]['attn_mass'].append(results['attn_mass'])
+        print(f"[seed={params['seed']}] {key}  AUROC={results['auroc']:.4f}  AUPRC={results['auprc']:.4f}  Attn mass={results['attn_mass']:.4f}")
+
+    print("\n=== Summary (mean +/- std across seeds) ===")
+    for key, metrics in grouped.items():
+        for name in ('auroc', 'auprc', 'attn_mass'):
+            vals = np.array(metrics[name])
+            print(f"  {key} {name}: {vals.mean():.4f} +/- {vals.std():.4f}")
