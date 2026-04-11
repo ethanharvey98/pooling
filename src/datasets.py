@@ -102,15 +102,37 @@ class ShiftedMeanMILDataset(torch.utils.data.Dataset):
     ) -> Tuple[torch.Tensor, int, torch.Tensor]:
         return self.h_split[index], self.lengths[index], self.y[index]
 
+    def _likelihood_per_u(
+        self,
+        index: int,
+    ) -> torch.Tensor:
+        """p(h_i | u, y_i=1, S_i) for each u. Shape: (S_i - r + 1,)"""
+        h = self.h_split[index][:, 0:self.k]
+        s_i = self.lengths[index]
+        p_h_given_u_y1 = torch.stack([torch.stack([torch.stack([utils.normal_pdf(h[j, k], self.mu + self.delta) if j >= u and j < (u + self.r) else utils.normal_pdf(h[j, k]) for k in range(self.k)]) for j in range(s_i)]) for u in range(s_i - self.r + 1)])
+        return torch.prod(torch.prod(p_h_given_u_y1, dim=-1), dim=-1)
+
     def p_y1_given_h(
-        self, 
+        self,
         index: int,
     ) -> torch.Tensor:
         h = self.h_split[index][:, 0:self.k]
         s_i = self.lengths[index]
         p_h_given_y0 = torch.prod(torch.stack([utils.normal_pdf(h[j]) for j in range(s_i)])) * (1.0 - self.p_y1)
         p_u = (1 / (s_i - self.r + 1)) * torch.ones(size=(s_i - self.r + 1,))
-        p_h_given_u_y1 = torch.stack([torch.stack([torch.stack([utils.normal_pdf(h[j, k], self.mu + self.delta) if j >= u and j < (u + self.r) else utils.normal_pdf(h[j, k]) for k in range(self.k)]) for j in range(s_i)]) for u in range(s_i - self.r + 1)])
-        p_h_given_y1 = torch.sum(torch.prod(torch.prod(p_h_given_u_y1, dim=-1), dim=-1) * p_u, dim=-1) * self.p_y1
+        p_h_given_y1 = torch.sum(self._likelihood_per_u(index) * p_u, dim=-1) * self.p_y1
         p_y1_given_h = p_h_given_y1 / (p_h_given_y0 + p_h_given_y1)
         return p_y1_given_h
+
+    def p_instance_given_h(
+        self,
+        index: int,
+    ) -> torch.Tensor:
+        """Instance-level Bayes estimator: p(y_{i,j}=1 | h_i, y_i=1, S_i). Shape: (S_i,)"""
+        s_i = self.lengths[index]
+        likelihood_per_u = self._likelihood_per_u(index)
+        p_u_posterior = likelihood_per_u / likelihood_per_u.sum()
+        scores = torch.zeros(s_i)
+        for u in range(s_i - self.r + 1):
+            scores[u:u + self.r] += p_u_posterior[u]
+        return scores
