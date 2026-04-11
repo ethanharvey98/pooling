@@ -25,7 +25,7 @@ if __name__ == '__main__':
     ]:
         aurocs = []
         for seed in seeds:
-            ds = datasets.ShiftedMeanMILDataset(n=n_test, delta=delta, r=r, k=1, m=1, seed=seed)
+            ds = datasets.ShiftedMeanMILDataset(n=n_test, delta=delta, r=r, seed=seed)
             seed_aurocs = []
             for i in range(len(ds)):
                 if ds.y[i] == 1.0:
