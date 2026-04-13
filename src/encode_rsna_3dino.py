@@ -1,19 +1,40 @@
 import argparse
 import ast
 import os
+import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 import torch
+import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import utils
 
-# python ../src/encode_rsna_3dino.py --encoded_dir='...' --numpy_dir='/path/to/rsna_numpy' --csv_path='/path/to/rsna_labels.csv' --seed=42 --hf_download --avgpool
+# python ../src/encode_rsna_3dino.py --encoded_dir='/cluster/tufts/hugheslab/dloevl01/encoded_RSNA_ICH/3DINO_ViT_concat/seed=1001' --numpy_dir='/cluster/tufts/hugheslab/datasets/RSNA_ICH_numpy' --csv_path='/cluster/tufts/hugheslab/datasets/RSNA_ICH/subset_labels.csv' --pretrained_weights='...' --seed=1001 --avgpool
+
+
+def load_and_resample_rsna_volume(path, target_size=(112, 112, 112)):
+    """Load RSNA .npz (D, H, W) and resample to target size for 3DINO.
+
+    RSNA CT volumes are stored as (num_slices, H, W) from preprocess_rsna.py.
+    We transpose to (H, W, D) before resampling to match 3DINO's expected orientation.
+    """
+    data = np.load(path)
+    arr = data['arr_0']  # (D, H, W)
+    arr = np.transpose(arr, (1, 2, 0))  # (H, W, D)
+
+    volume = torch.as_tensor(arr, dtype=torch.float32)
+    volume = volume.unsqueeze(0).unsqueeze(0)  # (1, 1, H, W, D)
+    volume = F.interpolate(volume, size=target_size, mode='trilinear', align_corners=False)
+    volume = utils.normalize_volume_3dino(volume)
+    return [volume]
+
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Encode RSNA ICH volumes with 3DINO.')
+    parser = argparse.ArgumentParser(description='Encode RSNA ICH 1149-subset volumes with 3DINO.')
     parser.add_argument('--encoded_dir', required=True, type=str)
     parser.add_argument('--numpy_dir', required=True, type=str)
-    parser.add_argument('--csv_path', required=True, type=str)
+    parser.add_argument('--csv_path', required=True, type=str,
+                        help='Path to subset_labels.csv (Patient ID, Study ID, Slice ID, z, Any)')
     parser.add_argument('--seed', default=42, type=int)
     parser.add_argument('--n_last_blocks', default=4, type=int)
     parser.add_argument('--avgpool', action='store_true', default=False)
@@ -30,16 +51,16 @@ if __name__ == '__main__':
         args.pretrained_weights = hf_hub_download(repo_id="AICONSlab/3DINO-ViT", filename="3dino_vit_weights.pth")
     assert args.pretrained_weights is not None, "Provide --pretrained_weights or --hf_download"
 
-    # --- Load and prepare labels (follows friend's RSNA data loading) ---
+    # --- Load and prepare labels (subset_labels.csv: Patient ID, Study ID, Slice ID, z, Any) ---
     labels_df = pd.read_csv(args.csv_path)
-    columns = ["Slice ID", "z", "Any"]
+    columns = ['Slice ID', 'z', 'Any']
     labels_df[columns] = labels_df[columns].apply(lambda col: col.map(ast.literal_eval))
-    labels_df["path"] = labels_df["Study ID"].apply(lambda study_id: f"{args.numpy_dir}/{study_id}.npz")
-    labels_df["ICH"] = labels_df.apply(lambda row: float(any(row.Any)), axis=1)
+    labels_df['path'] = labels_df['Study ID'].apply(lambda study_id: f'{args.numpy_dir}/{study_id}.npz')
+    labels_df['ICH'] = labels_df.apply(lambda row: float(any(row.Any)), axis=1)
 
     # --- Patient-level stratified split ---
-    grouped_df = labels_df.groupby("Patient ID")["ICH"].agg(lambda x: x.mode()[0]).reset_index()
-    ids, id_labels = grouped_df["Patient ID"], grouped_df["ICH"]
+    grouped_df = labels_df.groupby('Patient ID')['ICH'].agg(lambda x: x.mode()[0]).reset_index()
+    ids, id_labels = grouped_df['Patient ID'], grouped_df['ICH']
     train_and_val_ids, test_ids, train_and_val_id_labels, _ = train_test_split(
         ids, id_labels, test_size=1/6, random_state=args.seed, stratify=id_labels
     )
@@ -47,9 +68,9 @@ if __name__ == '__main__':
         train_and_val_ids, test_size=1/5, random_state=args.seed, stratify=train_and_val_id_labels
     )
 
-    train_df = labels_df[labels_df["Patient ID"].isin(train_ids)]
-    val_df = labels_df[labels_df["Patient ID"].isin(val_ids)]
-    test_df = labels_df[labels_df["Patient ID"].isin(test_ids)]
+    train_df = labels_df[labels_df['Patient ID'].isin(train_ids)]
+    val_df = labels_df[labels_df['Patient ID'].isin(val_ids)]
+    test_df = labels_df[labels_df['Patient ID'].isin(test_ids)]
 
     print(f"Split: train={len(train_df)}, val={len(val_df)}, test={len(test_df)}")
 
@@ -69,7 +90,7 @@ if __name__ == '__main__':
         X, lengths, y = [], [], []
 
         for _, row in split_df.iterrows():
-            volumes = utils.load_and_resample_volume(row['path'])
+            volumes = load_and_resample_rsna_volume(row['path'])
             embedding = torch.cat([
                 utils.encode_image_3dino(model, v, device, args.n_last_blocks, args.avgpool)
                 for v in volumes
@@ -77,7 +98,7 @@ if __name__ == '__main__':
 
             X.append(embedding)
             lengths.append(1)
-            y.append(torch.tensor([row["ICH"]], dtype=torch.float32))
+            y.append(torch.tensor([row['ICH']], dtype=torch.float32))
 
             # Save axial slices for the first volume to verify orientation
             if not saved_slices:
