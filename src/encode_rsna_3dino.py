@@ -13,20 +13,23 @@ import utils
 
 
 def load_and_resample_rsna_volume(path, target_size=(112, 112, 112)):
-    """Load RSNA .npz (D, H, W) and resample to target size for 3DINO.
-
-    RSNA CT volumes are stored as (num_slices, H, W) from preprocess_rsna.py.
-    We transpose to (H, W, D) before resampling to match 3DINO's expected orientation.
-    """
+    """Load RSNA .npz (C, H, W, D) and resample to target size for 3DINO."""
     data = np.load(path)
-    arr = data['arr_0']  # (D, H, W)
-    arr = np.transpose(arr, (1, 2, 0))  # (H, W, D)
+    arr = data['arr_0']  # (C, H, W, D) or (H, W, D)
 
-    volume = torch.as_tensor(arr, dtype=torch.float32)
-    volume = volume.unsqueeze(0).unsqueeze(0)  # (1, 1, H, W, D)
-    volume = F.interpolate(volume, size=target_size, mode='trilinear', align_corners=False)
-    volume = utils.normalize_volume_3dino(volume)
-    return [volume]
+    if arr.ndim == 4:
+        channels = [arr[c] for c in range(arr.shape[0])]
+    else:
+        channels = [arr]
+
+    volumes = []
+    for ch in channels:
+        volume = torch.as_tensor(ch, dtype=torch.float32)
+        volume = volume.unsqueeze(0).unsqueeze(0)  # (1, 1, H, W, D)
+        volume = F.interpolate(volume, size=target_size, mode='trilinear', align_corners=False)
+        volume = utils.normalize_volume_3dino(volume)
+        volumes.append(volume)
+    return volumes
 
 
 if __name__ == '__main__':
