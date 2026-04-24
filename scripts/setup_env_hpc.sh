@@ -64,19 +64,21 @@ fi
 conda activate "$REPO_DIR/envs/qoq"
 
 # 4. Pip installs
+# Scientific stack via conda-forge (avoids Tufts' old glibc blocking numpy/pandas wheels).
+conda install -y -c conda-forge \
+  "numpy=1.26.*" \
+  "pandas>=2.2,<3" \
+  scikit-learn \
+  pillow \
+  nibabel \
+  tqdm
+
 pip install --upgrade pip
 pip install torch==2.4.1 --index-url https://download.pytorch.org/whl/cu121
 pip install \
-  "transformers>=4.49" \
+  "transformers>=4.49,<5" \
   accelerate \
-  qwen-vl-utils \
-  pillow \
-  "numpy==1.26.*" \
-  pandas \
-  scikit-learn \
-  tqdm \
-  "huggingface_hub>=0.24" \
-  nibabel
+  "huggingface_hub>=0.24"
 
 # 5. Pre-pull VLM weights into repo HF cache (confirms auth, forces download location).
 #    If HF_TOKEN is in the environment, use it; otherwise assume `huggingface-cli login`
