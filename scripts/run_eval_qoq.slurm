@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=qoq_oasis3
-#SBATCH --partition=gpu            # TODO: confirm Tufts partition (preempt / hugheslab / gpu)
-#SBATCH --gres=gpu:a100:1          # TODO: confirm GPU SKU available (a100 / h100 / rtx6000)
+#SBATCH --partition=hugheslab
+#SBATCH --gres=gpu:rtx_a6000:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=80G
 #SBATCH --time=24:00:00
