@@ -20,9 +20,10 @@
 
 set -euo pipefail
 
-# Resolve repo dir relative to this script (so the .slurm file is portable)
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+# SLURM copies this script to a spool dir on the compute node, so we cannot
+# resolve paths via BASH_SOURCE. Use SLURM_SUBMIT_DIR instead, set by sbatch
+# to the directory from which the job was submitted (expected: repo root).
+REPO_DIR="${SLURM_SUBMIT_DIR:-$PWD}"
 cd "$REPO_DIR"
 
 mkdir -p logs outputs
