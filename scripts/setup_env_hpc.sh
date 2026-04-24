@@ -74,7 +74,8 @@ conda install -y -c conda-forge \
   tqdm
 
 pip install --upgrade pip
-pip install torch==2.4.1 --index-url https://download.pytorch.org/whl/cu121
+pip install torch==2.4.1 torchvision==0.19.1 \
+  --index-url https://download.pytorch.org/whl/cu121
 pip install \
   "transformers>=4.49,<5" \
   accelerate \
