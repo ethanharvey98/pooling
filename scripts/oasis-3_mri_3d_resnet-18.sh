@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --array=83-95%10
+#SBATCH --array=0-95%10
 #SBATCH --error=/cluster/tufts/hugheslab/eharve06/slurmlog/err/log_%j.err
 #SBATCH --gres=gpu:a100:1
-#SBATCH --nodelist=cc1gpu[001,002,004,005]
+#SBATCH --nodelist=cc1gpu[001,002,003,004,005]
 #SBATCH --nodes=1
 #SBATCH --mem=16g
 #SBATCH --ntasks=4
@@ -13,7 +13,6 @@
 source ~/.bashrc
 conda activate l3d_2024f_cuda12_1
 
-# python ../src/fine-tune_oasis-3.py --alpha=0.01 --batch_size=4 --criterion='L2' --dataset_dir='/cluster/tufts/hugheslab/datasets/OASIS-3_MRI_numpy' --epochs=100 --experiments_dir='/cluster/tufts/hugheslab/eharve06/pooling/experiments/OASIS-3_MRI_OnTheDesign' --lr=0.001 --model_name='alpha=0.01_criterion=L2_lr=0.001_seed=1001' --save --seed=1001 --weight_decay=0.0
 # Define an array of commands
 experiments=(
     "python ../src/fine-tune_oasis-3.py --alpha=1.0 --batch_size=4 --criterion='L2' --dataset_dir='/cluster/tufts/hugheslab/datasets/OASIS-3_MRI_numpy' --epochs=100 --experiments_dir='/cluster/tufts/hugheslab/eharve06/pooling/experiments/OASIS-3_MRI_3D_ResNet-18' --lr=0.1 --model_name='alpha=1.0_criterion=L2_lr=0.1_seed=1001' --save --seed=1001 --weight_decay=0.0"

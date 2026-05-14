@@ -7,7 +7,7 @@ def inv_sigmoid(x):
     return torch.log(x / (1 - x))
 
 def normal_pdf(x, mu=0.0, sigma=1.0):
-    norm_const = 1 / math.sqrt(2.0 * math.pi * sigma**2)
+    norm_const = 1 / torch.sqrt(torch.tensor(2.0 * torch.pi, device=x.device, dtype=x.dtype) * sigma ** 2)
     exp_quad_term = torch.exp(-0.5 * ((x - mu) / sigma) ** 2)
     return norm_const * exp_quad_term
 
@@ -30,9 +30,31 @@ def pad_image(image):
 
 def collate_fn(batch):
     images, lengths, labels = zip(*batch)
+    #images, lengths, labels, lengths_labels = zip(*batch)
     images = torch.cat(images)
     labels = torch.stack(labels)
     return images, lengths, labels
+    #return images, lengths, labels, lengths_labels
+    
+def instance_level_collate_fn(batch):
+    images, lengths, labels = zip(*batch)
+    images = torch.cat(images)
+    labels = torch.cat(labels)
+    return images, lengths, labels
+
+def forward_with_lengths(self, x, lengths):
+    x_split = torch.split(x, lengths)
+    if len(set(x_i.shape[0] for x_i in x_split)) == 1:
+        out = self.original_forward(torch.stack(x_split).permute(0, 2, 1, 3, 4))
+    else:
+        out = torch.cat([self.original_forward(x_i.permute(1, 0, 2, 3).unsqueeze(0)) for x_i in x_split])
+    return out, None
+
+def multiple_modalities_forward(self, x, lengths):
+    stacked_x_split = torch.stack(torch.split(x, lengths))
+    B, S, C, W, H = stacked_x_split.shape
+    out = self.original_forward(stacked_x_split.reshape(B * S * C, W, H).unsqueeze(dim=1))
+    return out.reshape(B * S, -1)
     
 def encode_image(model, image):
     
@@ -60,23 +82,27 @@ def train_one_epoch(model, criterion, optimizer, dataloader, lr_scheduler=None):
     metrics = {'auroc': 0.0, 'auprc': 0.0, 'bal_acc': 0.0, 'labels': [], 'logits': [], 'loss': 0.0, 'nll': 0.0}
 
     for images, lengths, labels in dataloader:
-        
+    #for images, lengths, labels, lengths_labels in dataloader:
+                
         batch_size = len(lengths)
 
         if device.type == 'cuda':
-            images, labels = images.to(device), labels.to(device)
-        
+            images = images.to(device)
+            labels = labels.to(device)
+
         optimizer.zero_grad()
+
         params = torch.nn.utils.parameters_to_vector(model.parameters())
         logits, attn_weights = model(images, lengths)
-        losses = criterion(logits, labels, attn_weights=attn_weights, lengths=lengths, params=params, N=len(dataloader.dataset))
+        losses = criterion(logits, labels, attn_weights=attn_weights, lengths=lengths, params=params, n=len(dataloader.dataset))
+        #losses = criterion(logits, labels, attn_weights=attn_weights, lengths=lengths, lengths_labels=lengths_labels, params=params, n=len(dataloader.dataset))
         losses['loss'].backward()
-        
+
         for group in optimizer.param_groups:
             torch.nn.utils.clip_grad_norm_(group['params'], max_norm=1.0)
-            
+
         optimizer.step()
-                
+
         if lr_scheduler:
             lr_scheduler.step()
 
@@ -84,13 +110,14 @@ def train_one_epoch(model, criterion, optimizer, dataloader, lr_scheduler=None):
         metrics['nll'] += (batch_size / dataset_size) * losses['nll'].item()
 
         if device.type == 'cuda':
-            labels, logits = labels.detach().cpu(), logits.detach().cpu()
+            labels = labels.detach().cpu()
+            logits = logits.detach().cpu()
 
         metrics['labels'].extend(labels)
         metrics['logits'].extend(logits)
             
     logits = torch.stack(metrics['logits'])
-    probs = torch.nn.functional.sigmoid(logits).numpy()
+    probs = torch.nn.functional.sigmoid(logits).detach().numpy()
     preds = (probs >= 0.5).astype(int)
     labels = torch.stack(metrics['labels'])
     metrics['auroc'] = roc_auc_score(labels.numpy(), probs)
@@ -109,6 +136,7 @@ def evaluate(model, criterion, dataloader):
 
     with torch.no_grad():
         for images, lengths, labels in dataloader:
+        #for images, lengths, labels, lengths_labels in dataloader:
             
             batch_size = len(lengths)
 
@@ -117,7 +145,8 @@ def evaluate(model, criterion, dataloader):
 
             params = torch.nn.utils.parameters_to_vector(model.parameters())
             logits, attn_weights = model(images, lengths)
-            losses = criterion(logits, labels, attn_weights=attn_weights, lengths=lengths, params=params, N=len(dataloader.dataset))
+            losses = criterion(logits, labels, attn_weights=attn_weights, lengths=lengths, params=params, n=len(dataloader.dataset))
+            #losses = criterion(logits, labels, attn_weights=attn_weights, lengths=lengths, lengths_labels=lengths_labels, params=params, n=len(dataloader.dataset))
 
             metrics['loss'] += (batch_size / dataset_size) * losses['loss'].item()
             metrics['nll'] += (batch_size / dataset_size) * losses['nll'].item()
@@ -129,7 +158,7 @@ def evaluate(model, criterion, dataloader):
             metrics['logits'].extend(logits)
 
         logits = torch.stack(metrics['logits'])
-        probs = torch.nn.functional.sigmoid(logits).numpy()
+        probs = torch.nn.functional.sigmoid(logits).detach().numpy()
         preds = (probs >= 0.5).astype(int)
         labels = torch.stack(metrics['labels'])
         metrics['auroc'] = roc_auc_score(labels.numpy(), probs)

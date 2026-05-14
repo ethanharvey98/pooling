@@ -97,7 +97,7 @@ def label_oasis3(directory, scan_types, condition):
     merged_df = pd.merge(scan_df, diagnosis_df, on='Subject', how='inner')
     merged_df['diff'] = merged_df['scan_day'] - merged_df['diagnosis_day']
     merged_df['abs_diff'] = abs(merged_df['scan_day'] - merged_df['diagnosis_day'])
-    # Diagnosis date must be between 80 days before or 360 days after scan date.
+    # Diagnosis date must be between 80 days before or 365 days after scan date.
     merged_df = merged_df[(merged_df['diff'] <= 80) & (merged_df['diff'] >= -365)]
     merged_df = merged_df.loc[merged_df.groupby(['MR ID'])['abs_diff'].idxmin()]
     

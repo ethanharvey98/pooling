@@ -78,7 +78,7 @@ class InstanceConv1d(torch.nn.Module):
         kernel_size: int = 3
     ):
         super().__init__()
-        self.conv = torch.nn.Conv1d(in_channels=in_features, out_channels=in_features, kernel_size=kernel_size, groups=in_features, padding='same')
+        self.conv = torch.nn.Conv1d(in_channels=in_features, out_channels=in_features, kernel_size=kernel_size, groups=in_features, padding="same")
         
     def forward(
         self, 
@@ -139,9 +139,10 @@ class TransformerLayer(torch.nn.Module):
         x: torch.Tensor, 
         lengths: Tuple[int, ...],
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        norm_x = self.norm(x)
         out, attn_weights = zip(*[
-            self.attn(x_i, x_i, x_i) 
-            for x_i in torch.split(self.norm(x), lengths)
+            self.attn(x_i, x_i, x_i, need_weights=True, average_attn_weights=False) 
+            for x_i in torch.split(norm_x, lengths)
         ])
         out = x + torch.cat(out)
         return out, attn_weights
@@ -157,6 +158,7 @@ class TransMIL(torch.nn.Module):
         self.layer1 = TransformerLayer(in_features=in_features, num_heads=num_heads)
         self.pos_layer = PPEG(in_features=in_features)        
         self.layer2 = TransformerLayer(in_features=in_features, num_heads=num_heads)
+        #self.norm = torch.nn.LayerNorm(normalized_shape=in_features)
 
     def forward(
         self, 
@@ -176,6 +178,10 @@ class TransMIL(torch.nn.Module):
         # Second transformer layer
         out, attn_weights = self.layer2(out, lengths)
         # Get class token
+        #out = torch.stack([
+        #    self.norm(out_i[0,:]) 
+        #    for out_i in torch.split(out, lengths)
+        #])
         out = torch.stack([
             out_i[0,:] 
             for out_i in torch.split(out, lengths)
@@ -183,10 +189,11 @@ class TransMIL(torch.nn.Module):
         # Get attention weights from class token
         # Remove attention weight for class token
         attn_weights = torch.cat([
-            attn_weights_i[0,1:] 
+            attn_weights_i[:,0,1:].T
             for attn_weights_i in attn_weights
         ])
         return out, attn_weights
+        #return out, torch.mean(attn_weights, dim=1, keepdim=True)
     
 class Sm(torch.nn.Module):
     def __init__(
@@ -391,4 +398,70 @@ class SmAP(torch.nn.Module):
             for out_i in torch.split(out, lengths)
         ])
         return out, attn_weights
+<<<<<<< Updated upstream
     
+=======
+        
+class SmTransformerLayer(torch.nn.Module):
+    def __init__(
+        self, 
+        in_features: int, 
+        num_heads: int = 8,
+        alpha: float = 0.5,
+        num_steps: int = 10,
+        neighbors: int = 1,
+    ):
+        super().__init__()
+        self.norm = torch.nn.LayerNorm(normalized_shape=in_features)
+        self.attn = torch.nn.MultiheadAttention(embed_dim=in_features, num_heads=num_heads)
+        self.sm_layer = ApproxSm(alpha=alpha, learnable_alpha=True, num_steps=num_steps, neighbors=neighbors)
+
+    def forward(
+        self, 
+        x: torch.Tensor, 
+        lengths: Tuple[int, ...],
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        norm_x = self.norm(x)
+        out, attn_weights = zip(*[
+            self.attn(x_i, x_i, x_i, need_weights=True, average_attn_weights=False) 
+            for x_i in torch.split(norm_x, lengths)
+        ])
+        out = [self.sm_layer(out_i) for out_i in out]
+        out = x + torch.cat(out)
+        return out, attn_weights
+    
+class SmTAP(torch.nn.Module):
+    def __init__(
+        self, 
+        in_features: int, 
+        num_heads: int = 8,
+        alpha: float = 0.5,
+        num_steps: int = 10,
+        neighbors: int = 1,
+    ):
+        super().__init__()
+        self.cls_token = torch.nn.Parameter(torch.randn(size=(1, in_features,)))
+        self.layer1 = SmTransformerLayer(in_features, num_heads, alpha, num_steps, neighbors)
+        self.pos_layer = PPEG(in_features=in_features)
+        self.layer2 = SmTransformerLayer(in_features, num_heads, alpha, num_steps, neighbors)
+
+    def forward(self, x, lengths):
+        x = torch.cat([
+            torch.cat((self.cls_token, x_i))
+            for x_i in torch.split(x, lengths)
+        ])
+        lengths = tuple(length + 1 for length in lengths)
+        out, _ = self.layer1(x, lengths)
+        out = self.pos_layer(out, lengths)
+        out, attn_weights = self.layer2(out, lengths)
+        out = torch.stack([
+            out_i[0,:]
+            for out_i in torch.split(out, lengths)
+        ])
+        attn_weights = torch.cat([
+            attn_weights_i[:,0,1:].T
+            for attn_weights_i in attn_weights
+        ])
+        return out, attn_weights
+    
+>>>>>>> Stashed changes

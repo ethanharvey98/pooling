@@ -33,12 +33,14 @@ class MILTensorDataset(torch.utils.data.Dataset):
         x: torch.Tensor, 
         lengths: Tuple, 
         y: torch.Tensor,
+        #lengths_y: torch.Tensor,
     ):
         super().__init__()
         self.x = x
         self.x_split = torch.split(x, lengths)
         self.lengths = lengths
         self.y = y
+        #self.lengths_y = lengths_y
 
     def __len__(
         self,
@@ -50,6 +52,7 @@ class MILTensorDataset(torch.utils.data.Dataset):
         index: int,
     ) -> Tuple[torch.Tensor, int, torch.Tensor]:
         return self.x_split[index], self.lengths[index], self.y[index]
+        #return self.x_split[index], self.lengths[index], self.y[index], self.lengths_y[index]
 
 class ShiftedMeanMILDataset(torch.utils.data.Dataset):
     def __init__(
@@ -102,15 +105,36 @@ class ShiftedMeanMILDataset(torch.utils.data.Dataset):
     ) -> Tuple[torch.Tensor, int, torch.Tensor]:
         return self.h_split[index], self.lengths[index], self.y[index]
 
+    def p_h_given_u_y1(
+        self,
+        index: int,
+    ) -> torch.Tensor:
+        h_ik = self.h_split[index][:, 0:self.k]
+        s_i = self.lengths[index]
+        p_h_given_u_y1 = torch.stack([torch.stack([torch.stack([utils.normal_pdf(h_ik[j, k], self.mu + self.delta) if j >= u and j < (u + self.r) else utils.normal_pdf(h_ik[j, k]) for k in range(self.k)]) for j in range(s_i)]) for u in range(s_i - self.r + 1)])
+        return torch.prod(torch.prod(p_h_given_u_y1, dim=-1), dim=-1)
+    
     def p_y1_given_h(
         self, 
         index: int,
     ) -> torch.Tensor:
-        h = self.h_split[index][:, 0:self.k]
+        h_ik = self.h_split[index][:, 0:self.k]
         s_i = self.lengths[index]
-        p_h_given_y0 = torch.prod(torch.stack([utils.normal_pdf(h[j]) for j in range(s_i)])) * (1.0 - self.p_y1)
+        p_h_given_y0 = torch.prod(torch.stack([utils.normal_pdf(h_ik[j]) for j in range(s_i)])) * (1.0 - self.p_y1)
         p_u = (1 / (s_i - self.r + 1)) * torch.ones(size=(s_i - self.r + 1,))
-        p_h_given_u_y1 = torch.stack([torch.stack([torch.stack([utils.normal_pdf(h[j, k], self.mu + self.delta) if j >= u and j < (u + self.r) else utils.normal_pdf(h[j, k]) for k in range(self.k)]) for j in range(s_i)]) for u in range(s_i - self.r + 1)])
-        p_h_given_y1 = torch.sum(torch.prod(torch.prod(p_h_given_u_y1, dim=-1), dim=-1) * p_u, dim=-1) * self.p_y1
+        p_h_given_y1 = torch.sum(self.p_h_given_u_y1(index) * p_u, dim=-1) * self.p_y1
         p_y1_given_h = p_h_given_y1 / (p_h_given_y0 + p_h_given_y1)
         return p_y1_given_h
+
+    def p_y_j1_given_h(
+        self,
+        index: int,
+    ) -> torch.Tensor:
+        s_i = self.lengths[index]
+        p_h_given_u_y1 = self.p_h_given_u_y1(index)
+        p_u_given_h_y1 = p_h_given_u_y1 / p_h_given_u_y1.sum()
+        scores = torch.zeros(s_i)
+        for u in range(s_i - self.r + 1):
+            scores[u:u + self.r] += p_u_given_h_y1[u]
+        return scores    
+    
