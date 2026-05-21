@@ -1,4 +1,4 @@
-"""Helpers for QoQ-Med-VL-7B zero-shot eval on OASIS-3."""
+"""Helpers for QoQ-Med-VL-7B zero-shot evals (OASIS-3, KPSC, ...)."""
 from __future__ import annotations
 
 import os
@@ -8,12 +8,29 @@ import numpy as np
 import pandas as pd
 from PIL import Image
 import torch
+import torch.nn.functional as F
+from sklearn.metrics import average_precision_score, balanced_accuracy_score, roc_auc_score
 
-PROMPT_TEMPLATE = (
-    "You are a radiologist. This is a 2D axial MRI slice of a human brain "
-    "({modality}-weighted). Is there evidence of Alzheimer's disease in this "
-    "slice? Answer with a single word: Yes or No."
-)
+
+PROMPTS = {
+    "alzheimers": (
+        "You are a radiologist. This is a 2D axial MRI slice of a human brain "
+        "({modality}-weighted). Is there evidence of Alzheimer's disease in this "
+        "slice? Answer with a single word: Yes or No."
+    ),
+    "cbi": (
+        "You are a radiologist. This is a 2D axial MRI slice of a human brain "
+        "({modality}-weighted). Is there evidence of a covert brain infarct in "
+        "this slice? Answer with a single word: Yes or No."
+    ),
+    "wmd": (
+        "You are a radiologist. This is a 2D axial MRI slice of a human brain "
+        "({modality}-weighted). Is there evidence of white matter disease in "
+        "this slice? Answer with a single word: Yes or No."
+    ),
+}
+
+PROMPT_TEMPLATE = PROMPTS["alzheimers"]
 
 
 def assert_caches_in_repo(repo: Path) -> None:
@@ -72,7 +89,7 @@ def aggregate(probs: list[float], top_k: int) -> dict:
 
 
 def load_labels(numpy_dir: Path, labels_csv: Path | None) -> pd.DataFrame:
-    """Load labels.csv; error if missing. Filter to rows with NPZ on disk."""
+    """OASIS-3 schema: Subject, MR ID, Alzheimer's. Filter to rows with NPZ on disk."""
     csv = Path(labels_csv) if labels_csv else Path(numpy_dir) / "labels.csv"
     if not csv.exists():
         raise FileNotFoundError(f"labels CSV not found: {csv}")
@@ -87,3 +104,109 @@ def load_labels(numpy_dir: Path, labels_csv: Path | None) -> pd.DataFrame:
     if df.empty:
         raise RuntimeError(f"No subjects in {csv} have a matching .npz in {numpy_dir}")
     return df
+
+
+_KPSC_TASK_COL = {"cbi": "idCBI", "wmd": "idWMD"}
+
+
+def load_kpsc_labels(numpy_dir: Path, labels_csv: Path | None, task: str) -> pd.DataFrame:
+    """KPSC schema: path, SiteID, idCBI, idWMD. Returns df with columns
+    (study_id, label, npz_path) for the requested task, filtered to existing NPZ files."""
+    if task not in _KPSC_TASK_COL:
+        raise ValueError(f"task must be one of {list(_KPSC_TASK_COL)}, got {task!r}")
+    csv = Path(labels_csv) if labels_csv else Path(numpy_dir) / "labels.csv"
+    if not csv.exists():
+        raise FileNotFoundError(f"labels CSV not found: {csv}")
+    df = pd.read_csv(csv)
+    label_col = _KPSC_TASK_COL[task]
+    need = {"path", label_col}
+    missing = need - set(df.columns)
+    if missing:
+        raise RuntimeError(f"labels CSV missing columns: {missing}")
+    df = df.copy()
+    df["npz_path"] = df["path"].apply(Path)
+    df["study_id"] = df["npz_path"].apply(lambda p: p.stem)
+    df["label"] = df[label_col].astype(int)
+    df = df[df["npz_path"].apply(Path.exists)].reset_index(drop=True)
+    if df.empty:
+        raise RuntimeError(f"No KPSC rows in {csv} have a matching .npz on disk")
+    keep = ["study_id", "label", "npz_path"]
+    if "SiteID" in df.columns:
+        keep.append("SiteID")
+    return df[keep].copy()
+
+
+def build_chat_inputs(processor, batch: list[tuple], prompt_template: str):
+    """batch: list of (PIL, modality). Returns processor(text, images) dict on CPU."""
+    texts = [processor.apply_chat_template(
+        [{"role": "user", "content": [
+            {"type": "image", "image": img},
+            {"type": "text", "text": prompt_template.format(modality=m)}]}],
+        tokenize=False, add_generation_prompt=True)
+        for img, m in batch]
+    return processor(text=texts, images=[img for img, _ in batch],
+                     padding=True, return_tensors="pt")
+
+
+def score_batch(model, processor, yes_id, no_id, batch, prompt_template=PROMPT_TEMPLATE):
+    """Deterministic Yes/No logit softmax. Returns list of P(Yes)."""
+    device = next(model.parameters()).device
+    inputs = build_chat_inputs(processor, batch, prompt_template).to(device)
+    with torch.inference_mode():
+        logits = model(**inputs).logits
+    last = logits[torch.arange(logits.size(0), device=logits.device),
+                  inputs["attention_mask"].sum(1) - 1]
+    yn = torch.stack([last[:, yes_id], last[:, no_id]], dim=-1).float()
+    return F.softmax(yn, dim=-1)[:, 0].cpu().tolist()
+
+
+def sample_answers(model, processor, batch, n_samples, temperature,
+                   prompt_template=PROMPT_TEMPLATE, max_new_tokens=1):
+    """Run model.generate n_samples times per batch element; return list[list[str]]
+    (outer: per batch item, inner: n_samples decoded strings)."""
+    if n_samples <= 0:
+        return [[] for _ in batch]
+    device = next(model.parameters()).device
+    inputs = build_chat_inputs(processor, batch, prompt_template).to(device)
+    prompt_len = inputs["input_ids"].shape[1]
+    rows = [[] for _ in batch]
+    with torch.inference_mode():
+        for _ in range(n_samples):
+            out = model.generate(
+                **inputs,
+                do_sample=True,
+                temperature=temperature,
+                max_new_tokens=max_new_tokens,
+                pad_token_id=processor.tokenizer.pad_token_id or processor.tokenizer.eos_token_id,
+            )
+            new_ids = out[:, prompt_len:]
+            decoded = processor.tokenizer.batch_decode(new_ids, skip_special_tokens=True)
+            for i, txt in enumerate(decoded):
+                rows[i].append(txt.strip())
+    return rows
+
+
+def yes_count_from_answers(answers: list[str]) -> int:
+    """Count answers whose first non-empty token starts with 'y' (case-insensitive)."""
+    n = 0
+    for a in answers:
+        t = (a or "").strip()
+        if t and t[0].lower() == "y":
+            n += 1
+    return n
+
+
+def metrics_for(labels, scores) -> dict:
+    try:
+        auroc = float(roc_auc_score(labels, scores))
+    except Exception:
+        auroc = float("nan")
+    try:
+        auprc = float(average_precision_score(labels, scores))
+    except Exception:
+        auprc = float("nan")
+    try:
+        bal = float(balanced_accuracy_score(labels, (np.asarray(scores) >= 0.5).astype(int)))
+    except Exception:
+        bal = float("nan")
+    return {"auroc": auroc, "auprc": auprc, "bal_acc": bal, "n": int(len(labels))}
