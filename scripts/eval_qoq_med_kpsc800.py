@@ -1,8 +1,12 @@
 """Zero-shot eval of ddvd233/QoQ-Med-VL-7B on KPSC 800 MRI.
 
 Two binary tasks: CBI (covert brain infarct) and WMD (white matter disease).
-Per slice we collect BOTH the deterministic Yes/No logit-softmax P(Yes) and
-N sampled generations at temperature > 0 (saved verbatim).
+Per slice we ask the model the same Yes/No prompt N times with sampling and
+take P(Yes) = (# 'Yes' answers) / N. No logit indexing, no per-volume
+percentile clipping — slices are normalized per-slice min/max.
+
+The first subject's PIL inputs are dumped to <output_dir>/sample_images/ so
+the user can eyeball that the model is seeing reasonable images.
 
 Smoke test:
     python scripts/eval_qoq_med_kpsc800.py --task cbi --max_subjects 4 \
@@ -43,8 +47,7 @@ def parse_args():
     p.add_argument("--dtype", choices=["bfloat16", "float16", "float32"], default="bfloat16")
     p.add_argument("--modalities", default="T1,T2")
     p.add_argument("--n_samples", type=int, default=5,
-                   help="Number of sampled generations per slice (in addition to "
-                        "the deterministic logit pass). 0 disables sampling.")
+                   help="Number of sampled generations per slice. Must be >= 1.")
     p.add_argument("--temperature", type=float, default=0.7)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--skip_cache_assert", action="store_true")
@@ -53,6 +56,8 @@ def parse_args():
 
 def main():
     args = parse_args()
+    if args.n_samples < 1:
+        raise ValueError("--n_samples must be >= 1")
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
     if not args.skip_cache_assert:
@@ -72,8 +77,6 @@ def main():
 
     from transformers import AutoProcessor
     processor = AutoProcessor.from_pretrained(args.model_id)
-    yes_id, no_id, yn_info = qu.resolve_yes_no_ids(processor.tokenizer)
-    print(f"[eval] Yes/No tokens: {yn_info}", flush=True)
 
     try:
         from transformers import Qwen2_5_VLForConditionalGeneration as ModelCls
@@ -88,35 +91,34 @@ def main():
     prompt = qu.PROMPTS[args.task]
 
     slice_rows, answer_rows, subj_rows = [], [], []
-    for _, row in tqdm(labels_df.iterrows(), total=len(labels_df), desc="subjects"):
+    for subj_idx, (_, row) in enumerate(
+        tqdm(labels_df.iterrows(), total=len(labels_df), desc="subjects")
+    ):
         vol = qu.load_volume(Path(row["npz_path"]))  # (D, C, H, W)
-        D = vol.shape[0]
-        idxs = qu.central_slice_indices(D, args.central_fraction)
-        bounds = {m: qu.percentile_bounds(vol[:, MOD_IDX[m]]) for m in modalities}
-
-        tasks = [(s, m, qu.slice_to_pil(vol[s, MOD_IDX[m]], *bounds[m]))
+        idxs = qu.central_slice_indices(vol.shape[0], args.central_fraction)
+        tasks = [(s, m, qu.slice_to_pil_minmax(vol[s, MOD_IDX[m]]))
                  for s in idxs for m in modalities]
 
-        logit_probs, sampled_probs = [], []
-        mod_logit = {m: [] for m in MOD_IDX}
+        if subj_idx == 0:
+            dump_dir = args.output_dir / "sample_images"
+            dump_dir.mkdir(parents=True, exist_ok=True)
+            for s, m, pil in tasks:
+                pil.save(dump_dir / f"{row['study_id']}_slice{s:03d}_{m}.png")
+
+        sampled_probs = []
         mod_sampled = {m: [] for m in MOD_IDX}
 
         for i in range(0, len(tasks), args.batch_size):
             chunk = tasks[i:i + args.batch_size]
             batch_pm = [(pil, m) for _, m, pil in chunk]
+            sa = qu.sample_answers(model, processor, batch_pm,
+                                   args.n_samples, args.temperature, prompt)
 
-            lp = qu.score_batch(model, processor, yes_id, no_id, batch_pm, prompt)
-            sa = qu.sample_answers(model, processor, batch_pm, args.n_samples,
-                                   args.temperature, prompt)
-
-            for (s, m, _), p_logit, answers in zip(chunk, lp, sa):
-                n_yes = qu.yes_count_from_answers(answers)
-                p_sampled = (n_yes / args.n_samples) if args.n_samples > 0 else float("nan")
+            for (s, m, _), answers in zip(chunk, sa):
+                p_sampled = qu.slice_prob_from_answers(answers)
                 slice_rows.append({
                     "study_id": row["study_id"], "slice_idx": int(s), "modality": m,
-                    "prob_yes_logit": float(p_logit),
                     "prob_yes_sampled": p_sampled,
-                    "n_sampled_yes": n_yes,
                     "n_samples": args.n_samples,
                 })
                 for k, txt in enumerate(answers):
@@ -124,27 +126,15 @@ def main():
                         "study_id": row["study_id"], "slice_idx": int(s), "modality": m,
                         "sample_idx": k, "raw_text": txt,
                     })
-                logit_probs.append(float(p_logit))
-                mod_logit[m].append(float(p_logit))
-                if args.n_samples > 0:
-                    sampled_probs.append(p_sampled)
-                    mod_sampled[m].append(p_sampled)
+                sampled_probs.append(p_sampled)
+                mod_sampled[m].append(p_sampled)
 
-        agg_logit = qu.aggregate(logit_probs, args.top_k)
-        t1_logit = qu.aggregate(mod_logit["T1"], args.top_k)
-        t2_logit = qu.aggregate(mod_logit["T2"], args.top_k)
         agg_samp = qu.aggregate(sampled_probs, args.top_k)
         t1_samp = qu.aggregate(mod_sampled["T1"], args.top_k)
         t2_samp = qu.aggregate(mod_sampled["T2"], args.top_k)
         subj_rows.append({
             "study_id": row["study_id"], "label": int(row["label"]),
-            "n_slices": len(logit_probs),
-            "logit_max_bag": agg_logit["max"], "logit_topk_mean_bag": agg_logit["topk_mean"],
-            "logit_mean_bag": agg_logit["mean"],
-            "logit_T1_max": t1_logit["max"], "logit_T1_topk_mean": t1_logit["topk_mean"],
-            "logit_T1_mean": t1_logit["mean"],
-            "logit_T2_max": t2_logit["max"], "logit_T2_topk_mean": t2_logit["topk_mean"],
-            "logit_T2_mean": t2_logit["mean"],
+            "n_slices": len(sampled_probs),
             "samp_max_bag": agg_samp["max"], "samp_topk_mean_bag": agg_samp["topk_mean"],
             "samp_mean_bag": agg_samp["mean"],
             "samp_T1_max": t1_samp["max"], "samp_T1_topk_mean": t1_samp["topk_mean"],
@@ -159,9 +149,6 @@ def main():
     subj_df.to_csv(args.output_dir / "per_subject_scores.csv", index=False)
 
     agg_cols = [
-        "logit_max_bag", "logit_topk_mean_bag", "logit_mean_bag",
-        "logit_T1_max", "logit_T1_topk_mean", "logit_T1_mean",
-        "logit_T2_max", "logit_T2_topk_mean", "logit_T2_mean",
         "samp_max_bag", "samp_topk_mean_bag", "samp_mean_bag",
         "samp_T1_max", "samp_T1_topk_mean", "samp_T1_mean",
         "samp_T2_max", "samp_T2_topk_mean", "samp_T2_mean",
@@ -173,7 +160,6 @@ def main():
         if np.isnan(scores).all():
             continue
         metrics[col] = qu.metrics_for(labels, np.nan_to_num(scores, nan=0.5))
-    metrics["_yn"] = yn_info
     metrics["_task"] = args.task
     metrics["_prompt"] = prompt
     (args.output_dir / "metrics.json").write_text(json.dumps(metrics, indent=2))

@@ -66,6 +66,15 @@ def percentile_bounds(vol_mod: np.ndarray) -> tuple[float, float]:
     return float(lo), float(max(hi, lo + 1e-6))
 
 
+def slice_to_pil_minmax(slice_2d: np.ndarray) -> Image.Image:
+    lo = float(slice_2d.min())
+    hi = float(slice_2d.max())
+    img = (slice_2d - lo) / max(hi - lo, 1e-6)
+    img = (img * 255).clip(0, 255).astype(np.uint8)
+    img = np.rot90(img, k=1)
+    return Image.fromarray(np.stack([img] * 3, axis=-1), mode="RGB")
+
+
 def resolve_yes_no_ids(tokenizer) -> tuple[int, int, dict]:
     def find(variants):
         for v in variants:
@@ -194,6 +203,25 @@ def yes_count_from_answers(answers: list[str]) -> int:
         if t and t[0].lower() == "y":
             n += 1
     return n
+
+
+def slice_prob_from_answers(answers: list[str]) -> float:
+    """Map each answer to 1.0 (contains 'yes'), 0.0 (contains 'no'), 0.5 otherwise.
+    Return the mean. Empty list -> NaN."""
+    if not answers:
+        return float("nan")
+    scores = []
+    for a in answers:
+        t = (a or "").lower()
+        has_y = "yes" in t
+        has_n = "no" in t
+        if has_y and not has_n:
+            scores.append(1.0)
+        elif has_n and not has_y:
+            scores.append(0.0)
+        else:
+            scores.append(0.5)
+    return float(np.mean(scores))
 
 
 def metrics_for(labels, scores) -> dict:
