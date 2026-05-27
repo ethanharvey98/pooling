@@ -25,7 +25,11 @@
 
 set -euo pipefail
 
-TASK="${1:?Usage: sbatch $0 {cbi|wmd} [n_samples]}"
+if [[ -z "${1:-}" ]]; then
+  echo "Usage: sbatch $0 {cbi|wmd} [n_samples]" >&2
+  exit 1
+fi
+TASK="$1"
 N_SAMPLES="${2:-5}"
 case "$TASK" in
   cbi|wmd) ;;
