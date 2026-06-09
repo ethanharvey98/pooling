@@ -5,16 +5,16 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=80G
 #SBATCH --time=48:00:00
-#SBATCH --array=0-4
+#SBATCH --array=0-13
 #SBATCH --output=logs/%x_%A_%a.out
 #SBATCH --error=logs/%x_%A_%a.err
 
-# 5-way array job. Each task processes 1/5 of the RSNA studies.
+# 14-way array job. Each task processes 1/14 of the RSNA studies.
 # Usage (from repo root):
 #   sbatch scripts/run_eval_qoq_rsna.slurm
-# After all 5 finish, combine with:
+# After all 14 finish, combine with:
 #   python scripts/combine_rsna_shards.py \
-#       --shards outputs/qoq_rsna_<arrayjobid>_shard{0,1,2,3,4} \
+#       --shards outputs/qoq_rsna_<arrayjobid>_shard{0..13} \
 #       --out_dir outputs/qoq_rsna_<arrayjobid>_combined
 
 set -euo pipefail

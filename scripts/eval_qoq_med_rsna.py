@@ -25,9 +25,9 @@ from sklearn.metrics import average_precision_score, roc_auc_score
 from tqdm import tqdm
 
 MODEL_ID       = "ddvd233/QoQ-Med-VL-7B"
-NUMPY_DIR      = Path("/cluster/tufts/hugheslab/datasets/RSNA_numpy")
-LABELS_CSV     = Path("/cluster/tufts/hugheslab/datasets/RSNA/labels.csv")
-BATCH_SIZE     = 4
+NUMPY_DIR      = Path("/cluster/tufts/hugheslab/datasets/RSNA_ICH_numpy")
+LABELS_CSV     = Path("/cluster/tufts/hugheslab/datasets/RSNA_ICH/full_dataset_labels.csv")
+BATCH_SIZE     = 8
 MAX_NEW_TOKENS = 512
 BOXED_OPEN     = "\\boxed{"
 
