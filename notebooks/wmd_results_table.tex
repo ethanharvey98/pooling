@@ -1,0 +1,35 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{array}
+\pagestyle{empty}
+
+\begin{document}
+
+\begin{center}
+{\large\bfseries QoQ-Med-VL-7B zero-shot WMD classification on KPSC 800}\\[2pt]
+\small $n=800$ subjects. Per-slice probabilities from $N=5$ sampled
+generations (yes/no/0.5 voting); subject-level scores via max- or
+mean-pooling across slices.
+
+\vspace{1em}
+
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{l l c c c}
+\toprule
+Modality & Pooling & AUROC & AUPRC & Bal.\ Acc. \\
+\midrule
+\multirow{2}{*}{T1 + T2 (bag)} & max  & 0.496 & 0.674 & 0.499 \\
+                                & mean & \textbf{0.614} & \textbf{0.768} & 0.500 \\
+\midrule
+\multirow{2}{*}{T1 only}       & max  & 0.554 & 0.707 & \textbf{0.544} \\
+                                & mean & 0.556 & 0.732 & 0.500 \\
+\midrule
+\multirow{2}{*}{T2 only}       & max  & 0.496 & 0.674 & 0.499 \\
+                                & mean & 0.608 & 0.764 & 0.522 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\end{document}
