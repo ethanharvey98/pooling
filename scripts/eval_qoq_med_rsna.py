@@ -29,6 +29,7 @@ NUMPY_DIR      = Path("/cluster/tufts/hugheslab/datasets/RSNA_ICH_numpy")
 LABELS_CSV     = Path("/cluster/tufts/hugheslab/datasets/RSNA_ICH/full_dataset_labels.csv")
 BATCH_SIZE     = 8
 MAX_NEW_TOKENS = 512
+TOP_K          = 5
 BOXED_OPEN     = "\\boxed{"
 
 PROMPT = (
@@ -194,11 +195,14 @@ def main():
         for s, (txt, p) in enumerate(zip(all_responses, all_probs)):
             slice_rows.append({"study_id": row["study_id"], "slice_idx": s,
                                "prob_yes": float(p), "response": txt})
+        arr = np.asarray(all_probs)
+        k = min(TOP_K, arr.size)
         subj_rows.append({
             "study_id": row["study_id"], "label": int(row["label"]),
             "n_slices": len(all_probs),
-            "max":  float(np.max(all_probs)),
-            "mean": float(np.mean(all_probs)),
+            "max":       float(arr.max()),
+            "topk_mean": float(np.sort(arr)[-k:].mean()),
+            "mean":      float(arr.mean()),
         })
 
     pd.DataFrame(slice_rows).to_csv(args.output_dir / "per_slice_scores.csv", index=False)
@@ -206,7 +210,8 @@ def main():
     subj_df.to_csv(args.output_dir / "per_subject_scores.csv", index=False)
 
     labels = subj_df["label"].to_numpy()
-    metrics = {col: metrics_for(labels, subj_df[col].to_numpy()) for col in ("max", "mean")}
+    metrics = {col: metrics_for(labels, subj_df[col].to_numpy())
+               for col in ("max", "topk_mean", "mean")}
     metrics["_prompt"] = PROMPT
     (args.output_dir / "metrics.json").write_text(json.dumps(metrics, indent=2))
     print(json.dumps({k: v for k, v in metrics.items() if not k.startswith("_")}, indent=2))
