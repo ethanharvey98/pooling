@@ -3,13 +3,16 @@
 Two metric levels are reported:
 
   - Subject-level: per-study aggregated score (max / mean across slices)
-    vs. study label (Any positive slice -> 1). Same as src/layers.py::Max / Mean.
-  - Instance-level: per-slice prob_yes vs. per-slice ground truth from
-    `Any[slice_idx]`. Mirrors the sentinel logic in src/encode_rsna_full.py
-    (if len(Any) != n_slices for a study, skip that study's instances).
+    vs. study label. Same as src/layers.py::Max / Mean.
+  - Instance-level: per-bag AUROC/AUPRC over positive bags only, then averaged
+    across positive bags — matches scripts/evaluate_single_model.py
+    (commit f2d7edf). Negative bags are skipped (no positive instances to
+    discover); positive bags with all-positive or all-negative slice labels
+    are skipped from AUROC/AUPRC. Length mismatches between our per-slice
+    output and `Any` are truncated to the shorter length.
 
-Patient-level test partitions reproduced from src/encode_rsna_full.py for seeds
-1001 / 2001 / 3001.
+Patient-level test partitions reproduced from src/encode_rsna_full.py for
+seeds 1001 / 2001 / 3001.
 
 Usage (on the cluster):
     python scripts/rsna_seed_metrics.py \\
@@ -49,25 +52,33 @@ def patient_test_ids(labels_df: pd.DataFrame, seed: int) -> set:
     return set(test_ids.tolist())
 
 
-def attach_instance_labels(slices_df: pd.DataFrame, any_lists: dict) -> pd.DataFrame:
-    """Add inst_label column. Sentinel -1 if `Any` length != n_slices for that study."""
-    n_per_study = slices_df.groupby("study_id").size().to_dict()
-    out = []
-    for study, n in n_per_study.items():
+def per_bag_instance_metrics(slices_df: pd.DataFrame, any_lists: dict):
+    """Match scripts/evaluate_single_model.py: per-positive-bag AUROC/AUPRC
+    over instances within the bag, then averaged across positive bags.
+
+    Length mismatches between our per-slice rows and the labels `Any` list are
+    truncated to the shorter length. Negative bags (no positive slices in the
+    truncated labels) and bags with only one unique label are skipped.
+
+    Returns (aurocs, auprcs, n_positive_bags_with_metric).
+    """
+    aurocs, auprcs = [], []
+    df = slices_df.sort_values(["study_id", "slice_idx"], kind="mergesort")
+    for study, g in df.groupby("study_id", sort=False):
         any_list = any_lists.get(study)
-        if any_list is None or len(any_list) != n:
-            for _ in range(n):
-                out.append(-1)
-        else:
-            for s in range(n):
-                out.append(int(any_list[s]))
-    # The groupby preserves first-seen order. Reorder slices_df the same way for safety.
-    df = (slices_df
-          .sort_values(["study_id", "slice_idx"], kind="mergesort")
-          .reset_index(drop=True)
-          .copy())
-    df["inst_label"] = out
-    return df
+        if any_list is None:
+            continue
+        probs = g["prob_yes"].to_numpy()
+        labels = np.asarray(any_list, dtype=int)
+        n = min(len(probs), len(labels))
+        probs, labels = probs[:n], labels[:n]
+        if labels.sum() == 0:
+            continue
+        if len(np.unique(labels)) < 2:
+            continue
+        aurocs.append(float(roc_auc_score(labels, probs)))
+        auprcs.append(float(average_precision_score(labels, probs)))
+    return aurocs, auprcs
 
 
 def main():
@@ -106,13 +117,6 @@ def main():
         subj = subj.dropna(subset=["patient_id"]).reset_index(drop=True)
         slices = slices.dropna(subset=["patient_id"]).reset_index(drop=True)
 
-    # --- instance labels: -1 sentinel for length mismatch ---
-    slices = attach_instance_labels(slices, any_lists)
-    n_valid = (slices["inst_label"] != -1).sum()
-    n_mismatch_studies = slices[slices["inst_label"] == -1]["study_id"].nunique()
-    print(f"valid instance labels: {n_valid:,}/{len(slices):,}   "
-          f"({n_mismatch_studies:,} studies dropped for length mismatch)")
-
     # --- per-seed metrics ---
     per_seed_subj = {pool: {"auroc": [], "auprc": [], "n": []} for pool in POOLS}
     per_seed_inst = {"auroc": [], "auprc": [], "n": []}
@@ -133,17 +137,15 @@ def main():
                 per_seed_subj[pool]["n"].append(int(len(sub)))
                 print(f"    subj {pool:5s} AUROC={auroc:.3f} AUPRC={auprc:.3f}")
 
-        # Instance-level (drop sentinel and non-test slices)
-        slc = slices[(slices["patient_id"].isin(test_pats)) & (slices["inst_label"] != -1)]
-        if len(slc):
-            il = slc["inst_label"].to_numpy()
-            pp = slc["prob_yes"].to_numpy()
-            auroc, auprc = metric_pair(il, pp)
-            per_seed_inst["auroc"].append(auroc)
-            per_seed_inst["auprc"].append(auprc)
-            per_seed_inst["n"].append(int(len(slc)))
-            print(f"    inst        AUROC={auroc:.3f} AUPRC={auprc:.3f}   "
-                  f"n_slices={len(slc):,} (pos rate {il.mean():.3f})")
+        # Instance-level: per-positive-bag AUROC/AUPRC, then mean across pos bags
+        slc = slices[slices["patient_id"].isin(test_pats)]
+        aurocs, auprcs = per_bag_instance_metrics(slc, any_lists)
+        if aurocs:
+            per_seed_inst["auroc"].append(float(np.mean(aurocs)))
+            per_seed_inst["auprc"].append(float(np.mean(auprcs)))
+            per_seed_inst["n"].append(int(len(aurocs)))
+            print(f"    inst        AUROC={np.mean(aurocs):.3f} AUPRC={np.mean(auprcs):.3f}   "
+                  f"(over {len(aurocs):,} positive bags w/ mixed labels)")
 
     # --- mean ± std ---
     def summarize(d):
