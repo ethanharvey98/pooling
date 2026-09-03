@@ -1,6 +1,40 @@
+from typing import Tuple, Optional
 import torch
 # Importing our custom module(s)
 import layers
+
+class AdditiveMIL(torch.nn.Module):
+    def __init__(
+        self, 
+        in_features, 
+        out_features, 
+        hidden_dim: int = 128,
+    ):
+        super().__init__()
+        self.mlp = torch.nn.Sequential(
+            torch.nn.Linear(in_features=in_features, out_features=hidden_dim),
+            torch.nn.Tanh(),
+            torch.nn.Linear(in_features=hidden_dim, out_features=1),
+        )
+        self.clf = torch.nn.Linear(in_features=in_features, out_features=out_features, bias=True)
+
+    def forward(
+        self, 
+        x: torch.Tensor, 
+        lengths: Tuple[int, ...],
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        attn_logits = self.mlp(x)
+        attn_weights = torch.cat([
+            torch.nn.functional.softmax(attn_logits_i, dim=0) 
+            for attn_logits_i in torch.split(attn_logits, lengths)
+        ])
+        out = attn_weights * x
+        out = self.clf(out)
+        out = torch.cat([
+            torch.sum(out_i, dim=0, keepdim=True) 
+            for out_i in torch.split(out, lengths)
+        ])
+        return out, attn_weights
 
 class InstanceLevelClassifier(torch.nn.Module):
     def __init__(self, in_features, out_features, kernel_size):

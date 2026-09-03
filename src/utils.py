@@ -94,7 +94,7 @@ def train_one_epoch(model, criterion, optimizer, dataloader, lr_scheduler=None):
 
         params = torch.nn.utils.parameters_to_vector(model.parameters())
         logits, attn_weights = model(images, lengths)
-        losses = criterion(logits, labels, attn_weights=attn_weights, lengths=lengths, params=params, n=len(dataloader.dataset))
+        losses = criterion(logits, labels, attn_weights=attn_weights, lengths=lengths, params=params)
         #losses = criterion(logits, labels, attn_weights=attn_weights, lengths=lengths, lengths_labels=lengths_labels, params=params, n=len(dataloader.dataset))
         losses['loss'].backward()
 
@@ -145,7 +145,7 @@ def evaluate(model, criterion, dataloader):
 
             params = torch.nn.utils.parameters_to_vector(model.parameters())
             logits, attn_weights = model(images, lengths)
-            losses = criterion(logits, labels, attn_weights=attn_weights, lengths=lengths, params=params, n=len(dataloader.dataset))
+            losses = criterion(logits, labels, attn_weights=attn_weights, lengths=lengths, params=params)
             #losses = criterion(logits, labels, attn_weights=attn_weights, lengths=lengths, lengths_labels=lengths_labels, params=params, n=len(dataloader.dataset))
 
             metrics['loss'] += (batch_size / dataset_size) * losses['loss'].item()

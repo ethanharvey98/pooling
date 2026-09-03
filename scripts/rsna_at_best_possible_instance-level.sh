@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --array=84-95%4
+#SBATCH --array=0-83%4
 #SBATCH --error=/cluster/tufts/hugheslab/eharve06/slurmlog/err/log_%j.err
 #SBATCH --gres=gpu:rtx_6000:1
 #SBATCH --mem=16g
@@ -11,7 +11,7 @@
 source ~/.bashrc
 conda activate l3d_2024f_cuda12_1
 
-# Define an array of commands [84-95][0-95]
+# Define an array of commands [0-83][84-95][0-95]
 experiments=(
     "python ../src/best_possible_instance-level.py --alpha=1.0 --batch_size=64 --criterion='L1' --dataset_dir='/cluster/tufts/hugheslab/datasets/encoded_RSNA_AT/ViT_B_16/seed=1001' --epochs=1000 --experiments_dir='/cluster/tufts/hugheslab/eharve06/pooling/experiments/RSNA_AT_best_possible_instance-level' --kernel_size=29 --lr=0.1 --model_name='alpha=1.0_criterion=L1_lr=0.1_seed=1001' --save --seed=1001 --weight_decay=0.0"
     "python ../src/best_possible_instance-level.py --alpha=1.0 --batch_size=64 --criterion='L1' --dataset_dir='/cluster/tufts/hugheslab/datasets/encoded_RSNA_AT/ViT_B_16/seed=2001' --epochs=1000 --experiments_dir='/cluster/tufts/hugheslab/eharve06/pooling/experiments/RSNA_AT_best_possible_instance-level' --kernel_size=29 --lr=0.1 --model_name='alpha=1.0_criterion=L1_lr=0.1_seed=2001' --save --seed=2001 --weight_decay=0.0"

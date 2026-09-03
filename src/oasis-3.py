@@ -32,9 +32,9 @@ if __name__=="__main__":
     
     os.makedirs(args.experiments_dir, exist_ok=True)
     
-    train_data = torch.load(f"{args.dataset_dir}/train.pth", map_location=torch.device("cpu"), weights_only=False)
-    val_data = torch.load(f"{args.dataset_dir}/val.pth", map_location=torch.device("cpu"), weights_only=False)
-    test_data = torch.load(f"{args.dataset_dir}/test.pth", map_location=torch.device("cpu"), weights_only=False)
+    train_data = torch.load(f"{args.dataset_dir}/train.pt", map_location=torch.device("cpu"), weights_only=False)
+    val_data = torch.load(f"{args.dataset_dir}/val.pt", map_location=torch.device("cpu"), weights_only=False)
+    test_data = torch.load(f"{args.dataset_dir}/test.pt", map_location=torch.device("cpu"), weights_only=False)
     
     train_dataset = datasets.MILTensorDataset(train_data["X"], train_data["lengths"], train_data["y"])
     #train_dataset = datasets.MILTensorDataset(train_data["X"], train_data["lengths"], train_data["y"], train_data["lengths_y"])
@@ -52,12 +52,13 @@ if __name__=="__main__":
         model = models.PoolClf(in_features=train_data["X"].shape[1], out_features=1, pooling=args.pooling, neighbors=args.neighbors)
     else:
         model = models.ClfPool(in_features=train_data["X"].shape[1], out_features=1, pooling=args.pooling, neighbors=args.neighbors)
+    #model = models.AdditiveMIL(in_features=train_data["X"].shape[1], out_features=1)
             
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print(device)
     model.to(device)
     
-    assert args.criterion in ["ERM", "L1", "L2", "GuidedL1"]
+    assert args.criterion in ["ERM", "L1", "L2", "GuidedL1", "AEML1"]
     if args.criterion == "ERM":
         criterion = losses.ERMLoss(criterion=torch.nn.BCEWithLogitsLoss())
     elif args.criterion == "L1":
@@ -66,6 +67,8 @@ if __name__=="__main__":
         criterion = losses.L2Loss(alpha=args.alpha, criterion=torch.nn.BCEWithLogitsLoss())
     elif args.criterion == "GuidedL1":
         criterion = losses.GuidedAttentionL1Loss(alpha=args.alpha, beta=args.beta, criterion=torch.nn.BCEWithLogitsLoss())
+    elif args.criterion == "AEML1":
+        criterion = losses.AEML1Loss(alpha=args.alpha, beta=args.beta, criterion=torch.nn.BCEWithLogitsLoss())
     
     optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.weight_decay, momentum=0.9)
     
@@ -97,4 +100,12 @@ if __name__=="__main__":
     
         val_auroc_series = model_history_df[model_history_df.train_auroc > model_history_df.val_auroc].val_auroc
         if args.save and epoch == (val_auroc_series.idxmax() if not val_auroc_series.empty else None):
-            torch.save(model.state_dict(), f"{args.experiments_dir}/{args.model_name}.pt")
+            torch.save({
+                "state_dict": model.state_dict(),
+                "test_labels": torch.stack(test_metrics["labels"]),
+                "test_logits": torch.stack(test_metrics["logits"]),
+                "train_labels": torch.stack(train_metrics["labels"]),
+                "train_logits": torch.stack(train_metrics["logits"]),
+                "val_labels": torch.stack(val_metrics["labels"]),
+                "val_logits": torch.stack(val_metrics["logits"]),
+            }, f"{args.experiments_dir}/{args.model_name}.pt")
