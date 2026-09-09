@@ -26,6 +26,10 @@ if __name__=="__main__":
     parser.add_argument("--seed", default=42, help="TODO (default: 42)", type=int)
     parser.add_argument("--weight_decay", default=0.0, help="Weight decay (default: 0.0)", type=float)
     parser.add_argument("--neighbors", default=1, help="Number of neighbors for SmAP pooling (default: 1)", type=int)
+    parser.add_argument("--ng_mode", default="full", choices=["full", "fit_mean", "fit_std", "centered"], help="GuidedL1 mean/variance ablation: full (fit both moments), fit_mean (fixed variance), fit_std (fixed center), centered (fixed both) (default: \"full\")", type=str)
+    parser.add_argument("--empirical_mean", default=0.5, help="Fixed Normal-guidance center in normalized [0, 1] position, used when the mean is not fit (default: 0.5)", type=float)
+    parser.add_argument("--empirical_std", default=0.15, help="Fixed Normal-guidance std in normalized [0, 1] position, used when the variance is not fit (default: 0.15)", type=float)
+    parser.add_argument("--divergence", default="squared error", choices=["squared error", "forward kl", "reverse kl"], help="GuidedL1 divergence between attention and the guiding Normal (default: \"squared error\")", type=str)
     args = parser.parse_args()
     
     torch.manual_seed(args.seed)
@@ -66,7 +70,8 @@ if __name__=="__main__":
     elif args.criterion == "L2":
         criterion = losses.L2Loss(alpha=args.alpha, criterion=torch.nn.BCEWithLogitsLoss())
     elif args.criterion == "GuidedL1":
-        criterion = losses.GuidedAttentionL1Loss(alpha=args.alpha, beta=args.beta, criterion=torch.nn.BCEWithLogitsLoss())
+        ng_fit_mean, ng_fit_std = {"full": (True, True), "fit_mean": (True, False), "fit_std": (False, True), "centered": (False, False)}[args.ng_mode]
+        criterion = losses.GuidedAttentionL1Loss(alpha=args.alpha, beta=args.beta, criterion=torch.nn.BCEWithLogitsLoss(), divergence=args.divergence, fit_mean=ng_fit_mean, fit_std=ng_fit_std, empirical_mean=args.empirical_mean, empirical_std=args.empirical_std)
     elif args.criterion == "AEML1":
         criterion = losses.AEML1Loss(alpha=args.alpha, beta=args.beta, criterion=torch.nn.BCEWithLogitsLoss())
     
