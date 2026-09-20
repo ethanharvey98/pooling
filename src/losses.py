@@ -144,6 +144,7 @@ class GuidedAttentionL1Loss(torch.nn.Module):
         attn_weights: torch.Tensor,
         lengths: Tuple[int, ...],
         params: torch.Tensor,
+        **kwargs,
     ) -> Dict[str, torch.Tensor]:
         
         nll = self.criterion(logits, labels)
@@ -203,6 +204,7 @@ class AEML1Loss(torch.nn.Module):
         attn_weights: torch.Tensor,
         lengths: Tuple[int, ...],
         params: torch.Tensor,
+        **kwargs,
     ) -> Dict[str, torch.Tensor]:
         
         nll = self.criterion(logits, labels)
@@ -217,9 +219,41 @@ class AEML1Loss(torch.nn.Module):
 
         penalty = (self.alpha / 2) * params.abs().sum()
         aem_penalty = self.beta * torch.stack(entropy_penalties).mean()
-        
+
         return {
             "loss": nll + aem_penalty + penalty,
             "nll": nll,
         }
-    
+
+
+class CounterfactualL1Loss(torch.nn.Module):
+    """CIA-MIL (Chraki et al., MIDL 2026): the difference between the factual prediction
+    and a counterfactual prediction (same instances, random attention) must itself be
+    predictive of the label. Forces the decision to depend on the attended evidence.
+
+        loss = nll(logits, y) + (alpha / 2) * ||params||_1 + beta * nll(logits - logits_cf, y)
+    """
+
+    def __init__(
+        self,
+        alpha: float,
+        beta: float,
+        criterion: torch.nn.Module = torch.nn.BCEWithLogitsLoss(),
+    ) -> None:
+        super().__init__()
+        self.alpha = alpha
+        self.beta = beta
+        self.criterion = criterion
+
+    def forward(
+        self,
+        logits: torch.Tensor,
+        labels: torch.Tensor,
+        logits_cf: torch.Tensor,
+        params: torch.Tensor,
+        **kwargs,
+    ) -> Dict[str, torch.Tensor]:
+        nll = self.criterion(logits, labels)
+        penalty = (self.alpha / 2) * params.abs().sum()
+        effect = self.criterion(logits - logits_cf, labels)
+        return {"loss": nll + penalty + self.beta * effect, "nll": nll}

@@ -77,10 +77,17 @@ class ClfPool(torch.nn.Module):
         return out, attn_weights
     
 class PoolClf(torch.nn.Module):
-    def __init__(self, in_features, out_features, encoder=None, pooling="Max", num_heads=8, neighbors=1):
+    def __init__(self, in_features, out_features, encoder=None, pooling="Max", num_heads=8, neighbors=1, counterfactual=False):
         super().__init__()
-        
+
         self.encoder = encoder
+
+        # Counterfactual-intervention branch (CIA-MIL, Chraki et al., MIDL 2026): pool the
+        # instances with a random attention distribution and classify that too, so the loss
+        # can require the factual-minus-counterfactual prediction to be label-predictive.
+        self.counterfactual = counterfactual
+        if counterfactual:
+            assert pooling in ["ABMIL", "SmAP"], "counterfactual branch only supports attention-weighted-sum pooling"
 
         assert pooling in ["Max", "Mean", "ABMIL", "TransMIL", "SmAP", "SmTAP"]
         if pooling == "Max":
@@ -94,16 +101,27 @@ class PoolClf(torch.nn.Module):
         elif pooling == "SmAP":
             self.pool = layers.SmAP(in_features=in_features, neighbors=neighbors)
         elif pooling == "SmTAP":
-            self.pool = layers.SmTAP(in_features=in_features, neighbors=neighbors)
+            self.pool = layers.SmTP(in_features=in_features, neighbors=neighbors)
             
         self.clf = torch.nn.Linear(in_features=in_features, out_features=out_features, bias=True)
+
+    def _counterfactual_pool(self, x, lengths):
+        # random attention distribution per bag, then attention-weighted sum
+        pooled = []
+        for x_i in torch.split(x, lengths):
+            a_cf = torch.softmax(torch.rand(x_i.shape[0], 1, device=x_i.device, dtype=x_i.dtype), dim=0)
+            pooled.append((a_cf * x_i).sum(dim=0, keepdim=True))
+        return torch.cat(pooled)
 
     def forward(self, x, lengths):
         if self.encoder is not None:
             x = self.encoder(x, lengths)
         out, attn_weights = self.pool(x, lengths)
-        out = self.clf(out)
-        return out, attn_weights
+        logits = self.clf(out)
+        if self.counterfactual:
+            logits_cf = self.clf(self._counterfactual_pool(x, lengths))
+            return logits, attn_weights, logits_cf
+        return logits, attn_weights
     
 class OnTheDesign(torch.nn.Module):
     def __init__(self, num_channels, num_classes, expansion=4, norm_type="Instance"):

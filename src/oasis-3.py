@@ -30,6 +30,7 @@ if __name__=="__main__":
     parser.add_argument("--empirical_mean", default=0.5, help="Fixed Normal-guidance center in normalized [0, 1] position, used when the mean is not fit (default: 0.5)", type=float)
     parser.add_argument("--empirical_std", default=0.15, help="Fixed Normal-guidance std in normalized [0, 1] position, used when the variance is not fit (default: 0.15)", type=float)
     parser.add_argument("--divergence", default="squared error", choices=["squared error", "forward kl", "reverse kl"], help="GuidedL1 divergence between attention and the guiding Normal (default: \"squared error\")", type=str)
+    parser.add_argument("--beta_effect", default=1.0, help="CIA counterfactual-effect strength (default: 1.0)", type=float)
     args = parser.parse_args()
     
     torch.manual_seed(args.seed)
@@ -53,7 +54,7 @@ if __name__=="__main__":
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=args.batch_size, collate_fn=utils.collate_fn)
         
     if args.embedding_level:
-        model = models.PoolClf(in_features=train_data["X"].shape[1], out_features=1, pooling=args.pooling, neighbors=args.neighbors)
+        model = models.PoolClf(in_features=train_data["X"].shape[1], out_features=1, pooling=args.pooling, neighbors=args.neighbors, counterfactual=(args.criterion == "CIA"))
     else:
         model = models.ClfPool(in_features=train_data["X"].shape[1], out_features=1, pooling=args.pooling, neighbors=args.neighbors)
     #model = models.AdditiveMIL(in_features=train_data["X"].shape[1], out_features=1)
@@ -62,7 +63,7 @@ if __name__=="__main__":
     print(device)
     model.to(device)
     
-    assert args.criterion in ["ERM", "L1", "L2", "GuidedL1", "AEML1"]
+    assert args.criterion in ["ERM", "L1", "L2", "GuidedL1", "AEML1", "CIA"]
     if args.criterion == "ERM":
         criterion = losses.ERMLoss(criterion=torch.nn.BCEWithLogitsLoss())
     elif args.criterion == "L1":
@@ -74,7 +75,9 @@ if __name__=="__main__":
         criterion = losses.GuidedAttentionL1Loss(alpha=args.alpha, beta=args.beta, criterion=torch.nn.BCEWithLogitsLoss(), divergence=args.divergence, fit_mean=ng_fit_mean, fit_std=ng_fit_std, empirical_mean=args.empirical_mean, empirical_std=args.empirical_std)
     elif args.criterion == "AEML1":
         criterion = losses.AEML1Loss(alpha=args.alpha, beta=args.beta, criterion=torch.nn.BCEWithLogitsLoss())
-    
+    elif args.criterion == "CIA":
+        criterion = losses.CounterfactualL1Loss(alpha=args.alpha, beta=args.beta_effect, criterion=torch.nn.BCEWithLogitsLoss())
+
     optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.weight_decay, momentum=0.9)
     
     columns = ["epoch", "test_auroc", "test_auprc", "test_bal_acc", "test_loss", "test_nll", "train_auroc", "train_auprc", "train_bal_acc", "train_loss", "train_nll", "train_sec/epoch", "val_auroc", "val_auprc", "val_bal_acc", "val_loss", "val_nll"]

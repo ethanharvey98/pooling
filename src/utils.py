@@ -93,8 +93,10 @@ def train_one_epoch(model, criterion, optimizer, dataloader, lr_scheduler=None):
         optimizer.zero_grad()
 
         params = torch.nn.utils.parameters_to_vector(model.parameters())
-        logits, attn_weights = model(images, lengths)
-        losses = criterion(logits, labels, attn_weights=attn_weights, lengths=lengths, params=params)
+        out = model(images, lengths)
+        logits, attn_weights = out[0], out[1]
+        logits_cf = out[2] if len(out) > 2 else None
+        losses = criterion(logits, labels, attn_weights=attn_weights, lengths=lengths, params=params, logits_cf=logits_cf)
         #losses = criterion(logits, labels, attn_weights=attn_weights, lengths=lengths, lengths_labels=lengths_labels, params=params, n=len(dataloader.dataset))
         losses['loss'].backward()
 
@@ -144,8 +146,10 @@ def evaluate(model, criterion, dataloader):
                 images, labels = images.to(device), labels.to(device)
 
             params = torch.nn.utils.parameters_to_vector(model.parameters())
-            logits, attn_weights = model(images, lengths)
-            losses = criterion(logits, labels, attn_weights=attn_weights, lengths=lengths, params=params)
+            out = model(images, lengths)
+            logits, attn_weights = out[0], out[1]
+            logits_cf = out[2] if len(out) > 2 else None
+            losses = criterion(logits, labels, attn_weights=attn_weights, lengths=lengths, params=params, logits_cf=logits_cf)
             #losses = criterion(logits, labels, attn_weights=attn_weights, lengths=lengths, lengths_labels=lengths_labels, params=params, n=len(dataloader.dataset))
 
             metrics['loss'] += (batch_size / dataset_size) * losses['loss'].item()

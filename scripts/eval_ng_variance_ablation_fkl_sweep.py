@@ -2,7 +2,8 @@
 
 Per (ng_mode, seed): pick the (alpha, lr) in {1e-3,1e-4,1e-5} x {0.1,0.01,0.001} whose
 checkpoint has the highest val_auroc among epochs with train_auroc > val_auroc (the
-rule from notebooks/rsna_ich.ipynb), then score slice-localization on positive test bags.
+rule from notebooks/rsna_ich.ipynb), then score slice-localization on positive test bags
+and record the bag-level test_auroc (classification) at that same selected epoch.
 
 Run from the repo root in the neuroimg_gpu env:
     python scripts/eval_ng_variance_ablation_fkl_sweep.py
@@ -26,11 +27,12 @@ ALPHAS = ["0.001", "0.0001", "1e-05"]
 LRS = ["0.1", "0.01", "0.001"]
 MODES = ["full", "fit_mean", "fit_std", "centered"]
 DIV_TAG = "fkl"
+MU_SIGMA = {"full": "fit / fit", "fit_std": "frozen / fit", "centered": "frozen / frozen", "fit_mean": "fit / frozen"}
 
 
 def select(mode, seed):
     """Best (alpha, lr) for this (mode, seed) by val_auroc s.t. train_auroc > val_auroc."""
-    best = None  # (val, alpha, lr, name, epoch)
+    best = None  # (val, alpha, lr, name, epoch, test_auroc)
     for alpha in ALPHAS:
         for lr in LRS:
             name = f"alpha={alpha}_criterion=GuidedL1_div={DIV_TAG}_ng={mode}_lr={lr}_pooling=ABMIL_seed={seed}"
@@ -44,7 +46,7 @@ def select(mode, seed):
             i = int(g.val_auroc.idxmax())
             v = float(df.loc[i, "val_auroc"])
             if best is None or v > best[0]:
-                best = (v, alpha, lr, name, i)
+                best = (v, alpha, lr, name, i, float(df.loc[i, "test_auroc"]))
     return best
 
 
@@ -73,15 +75,19 @@ def main():
         d = torch.load(f"{DATA_DIR}/seed={s}/test.pt", map_location="cpu", weights_only=False)
         per_seed[s] = (datasets.MILTensorDataset(d["X"], d["lengths"], d["y"]), d["lengths_y"])
 
-    rows = []
+    sel_rows = []
+    sum_rows = []
     for mode in MODES:
-        acs, ars, aps, picks = [], [], [], []
+        acs, ars, aps, tests, picks = [], [], [], [], []
+        per_seed_pick = {}
         for s in SEEDS:
             best = select(mode, s)
             if best is None:
                 print(f"[skip] {mode} seed={s}: nothing finished")
+                per_seed_pick[s] = "n/a"
                 continue
-            val, alpha, lr, name, epoch = best
+            val, alpha, lr, name, epoch, test_auroc = best
+            per_seed_pick[s] = f"{alpha}, {lr}, ep {epoch}"
             if not os.path.exists(f"{EXP_DIR}/{name}.pt"):
                 print(f"[skip] {name}.pt missing")
                 continue
@@ -89,23 +95,32 @@ def main():
             acs.append(ac)
             ars.append(ar)
             aps.append(ap)
+            tests.append(test_auroc)
             picks.append(f"seed{s}:a={alpha},lr={lr}@ep{epoch}(val={val:.4f})")
+        sel_rows.append({"ng_mode": mode, "mu/sigma": MU_SIGMA[mode], **{f"seed {s}": per_seed_pick[s] for s in SEEDS}})
         if ars:
-            rows.append(
+            sum_rows.append(
                 {
-                    "divergence": "forward kl",
                     "ng_mode": mode,
+                    "mu/sigma": MU_SIGMA[mode],
                     "n_seeds": len(ars),
+                    "classification_auroc": f"{np.mean(tests):.3f} +/- {np.std(tests):.3f}",
                     "loc_auroc": f"{np.mean(ars):.3f} +/- {np.std(ars):.3f}",
                     "loc_auprc": f"{np.mean(aps):.3f} +/- {np.std(aps):.3f}",
                     "attn_corr": f"{np.mean(acs):.3f} +/- {np.std(acs):.3f}",
                     "picks": " ".join(picks),
                 }
             )
-    out = pd.DataFrame(rows)
-    print(out.to_string(index=False))
-    out.to_csv(f"{EXP_DIR}/_localization_summary.csv", index=False)
-    print(f"\nwrote {EXP_DIR}/_localization_summary.csv")
+
+    sel_df = pd.DataFrame(sel_rows)
+    sum_df = pd.DataFrame(sum_rows)
+    print("=== selection table ===")
+    print(sel_df.to_string(index=False))
+    print("\n=== summary table ===")
+    print(sum_df.to_string(index=False))
+    sel_df.to_csv(f"{EXP_DIR}/_selection_1000ep.csv", index=False)
+    sum_df.to_csv(f"{EXP_DIR}/_localization_summary.csv", index=False)
+    print(f"\nwrote {EXP_DIR}/_selection_1000ep.csv and {EXP_DIR}/_localization_summary.csv")
 
 
 if __name__ == "__main__":
