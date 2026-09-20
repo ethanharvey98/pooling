@@ -1,5 +1,6 @@
 import argparse
 import os
+import time
 import pandas as pd
 import torch
 # Importing our custom module(s)
@@ -46,11 +47,12 @@ if __name__=="__main__":
     val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=args.batch_size, collate_fn=utils.collate_fn)
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=args.batch_size, collate_fn=utils.collate_fn)
         
-    if args.embedding_level:
-        model = models.PoolClf(in_features=768, out_features=1, pooling=args.pooling, neighbors=args.neighbors)
-    else:
-        model = models.ClfPool(in_features=768, out_features=1, pooling=args.pooling, neighbors=args.neighbors)
-    
+#     if args.embedding_level:
+#         model = models.PoolClf(in_features=768, out_features=1, pooling=args.pooling, neighbors=args.neighbors)
+#     else:
+#         model = models.ClfPool(in_features=768, out_features=1, pooling=args.pooling, neighbors=args.neighbors)
+    model = models.AdditiveMIL(in_features=768, out_features=1)
+
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print(device)
     model.to(device)
@@ -67,18 +69,27 @@ if __name__=="__main__":
 
     optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.weight_decay, momentum=0.9)
     
-    columns = ["epoch", "test_auroc", "test_auprc", "test_bal_acc", "test_loss", "test_nll", "train_auroc", "train_auprc", "train_bal_acc", "train_loss", "train_nll", "val_auroc", "val_auprc", "val_bal_acc", "val_loss", "val_nll"]
+    columns = ["epoch", "test_auroc", "test_auprc", "test_bal_acc", "test_loss", "test_nll", "train_auroc", "train_auprc", "train_bal_acc", "train_loss", "train_nll", "train_sec/epoch", "val_auroc", "val_auprc", "val_bal_acc", "val_loss", "val_nll"]
     model_history_df = pd.DataFrame(columns=columns)
 
     for epoch in range(args.epochs):
         
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        epoch_start_time = time.time()
+
         shuffled_train_metrics = utils.train_one_epoch(model, criterion, optimizer, shuffled_train_loader)
+
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        epoch_end_time = time.time()        
+        
         #train_metrics = utils.evaluate(model, criterion, train_loader)
         train_metrics = shuffled_train_metrics
         val_metrics = utils.evaluate(model, criterion, val_loader)
         test_metrics = utils.evaluate(model, criterion, test_loader)
         
-        row = [epoch, test_metrics["auroc"], test_metrics["auprc"], test_metrics["bal_acc"], test_metrics["loss"], test_metrics["nll"], train_metrics["auroc"], train_metrics["auprc"], train_metrics["bal_acc"], train_metrics["loss"], train_metrics["nll"], val_metrics["auroc"], val_metrics["auprc"], val_metrics["bal_acc"], val_metrics["loss"], val_metrics["nll"]]
+        row = [epoch, test_metrics["auroc"], test_metrics["auprc"], test_metrics["bal_acc"], test_metrics["loss"], test_metrics["nll"], train_metrics["auroc"], train_metrics["auprc"], train_metrics["bal_acc"], train_metrics["loss"], train_metrics["nll"], epoch_end_time - epoch_start_time, val_metrics["auroc"], val_metrics["auprc"], val_metrics["bal_acc"], val_metrics["loss"], val_metrics["nll"]]
         model_history_df.loc[epoch] = row
         print(model_history_df.iloc[epoch])
         
@@ -86,4 +97,12 @@ if __name__=="__main__":
     
         val_auroc_series = model_history_df[model_history_df.train_auroc > model_history_df.val_auroc].val_auroc
         if args.save and epoch == (val_auroc_series.idxmax() if not val_auroc_series.empty else None):
-            torch.save(model.state_dict(), f"{args.experiments_dir}/{args.model_name}.pt")
+            torch.save({
+                "state_dict": model.state_dict(),
+                "test_labels": torch.stack(test_metrics["labels"]),
+                "test_logits": torch.stack(test_metrics["logits"]),
+                "train_labels": torch.stack(train_metrics["labels"]),
+                "train_logits": torch.stack(train_metrics["logits"]),
+                "val_labels": torch.stack(val_metrics["labels"]),
+                "val_logits": torch.stack(val_metrics["logits"]),
+            }, f"{args.experiments_dir}/{args.model_name}.pt")
