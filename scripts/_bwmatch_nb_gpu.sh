@@ -12,4 +12,4 @@
 source ~/.bashrc
 conda activate /cluster/tufts/hugheslab/zmou01/conda_envs/neuroimg_gpu
 cd /cluster/home/zmou01/pooling
-python scripts/eval_bandwidth_matched_notebook.py
+python "scripts/eval_bandwidth_matched_entropy_prec@1.py"
