@@ -13,6 +13,7 @@ if __name__=="__main__":
     parser = argparse.ArgumentParser(description="toy_data.py")
     parser.add_argument("--alpha", default=0.0, help='TODO (default: 0.0)', type=float)
     parser.add_argument("--batch_size", default=64, help="Batch size (default: 64)", type=int)
+    parser.add_argument("--beta", default=1.0, help="TODO (default: 1.0)", type=float)
     parser.add_argument("--criterion", default="ERM", help="TODO (default: \"ERM\")", type=str)
     parser.add_argument("--data_seed_test", default=2, help="TODO (default: 2)", type=int)
     parser.add_argument("--data_seed_train", default=0, help="TODO (default: 0)", type=int)
@@ -47,17 +48,17 @@ if __name__=="__main__":
     val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=args.batch_size, collate_fn=utils.collate_fn)
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=args.batch_size, collate_fn=utils.collate_fn)
         
-#     if args.embedding_level:
-#         model = models.PoolClf(in_features=768, out_features=1, pooling=args.pooling, neighbors=args.neighbors)
-#     else:
-#         model = models.ClfPool(in_features=768, out_features=1, pooling=args.pooling, neighbors=args.neighbors)
-    model = models.AdditiveMIL(in_features=768, out_features=1)
+    if args.embedding_level:
+        model = models.PoolClf(in_features=768, out_features=1, pooling=args.pooling, neighbors=args.neighbors)
+    else:
+        model = models.ClfPool(in_features=768, out_features=1, pooling=args.pooling, neighbors=args.neighbors)
+    #model = models.AdditiveMIL(in_features=768, out_features=1)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print(device)
     model.to(device)
         
-    assert args.criterion in ["ERM", "L1", "L2", "GuidedL1"]
+    assert args.criterion in ["ERM", "L1", "L2", "GuidedL1", "AEML1"]
     if args.criterion == "ERM":
         criterion = losses.ERMLoss(criterion=torch.nn.BCEWithLogitsLoss())
     elif args.criterion == "L1":
@@ -65,7 +66,9 @@ if __name__=="__main__":
     elif args.criterion == "L2":
         criterion = losses.L2Loss(alpha=args.alpha, criterion=torch.nn.BCEWithLogitsLoss())
     elif args.criterion == "GuidedL1":
-        criterion = losses.GuidedAttentionL1Loss(alpha=args.alpha, beta=1.0, criterion=torch.nn.BCEWithLogitsLoss())
+        criterion = losses.GuidedAttentionL1Loss(alpha=args.alpha, beta=args.beta, criterion=torch.nn.BCEWithLogitsLoss())
+    elif args.criterion == "AEML1":
+        criterion = losses.AEML1Loss(alpha=args.alpha, beta=args.beta, criterion=torch.nn.BCEWithLogitsLoss())
 
     optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.weight_decay, momentum=0.9)
     
