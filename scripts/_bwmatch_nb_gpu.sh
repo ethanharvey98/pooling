@@ -1,0 +1,15 @@
+#!/bin/bash
+#SBATCH --job-name=bwmatch_nb
+#SBATCH --partition=gpu
+#SBATCH --qos=preempt
+#SBATCH --gres=gpu:1
+#SBATCH --mem=16g
+#SBATCH --ntasks=4
+#SBATCH --time=01:30:00
+#SBATCH --output=/cluster/tufts/hugheslab/zmou01/slurmlog/out/bwmatch_nb_%j.out
+#SBATCH --error=/cluster/tufts/hugheslab/zmou01/slurmlog/err/bwmatch_nb_%j.err
+
+source ~/.bashrc
+conda activate /cluster/tufts/hugheslab/zmou01/conda_envs/neuroimg_gpu
+cd /cluster/home/zmou01/pooling
+python scripts/eval_bandwidth_matched_notebook.py

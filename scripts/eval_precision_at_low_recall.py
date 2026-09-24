@@ -66,9 +66,12 @@ def _load(key, build, ckpt):
 
 # --- per-slice score functions: (h_i [S,768], S_i, seed) -> np.array [S] ------------
 def score_centered_gaussian(h, S, seed):
+    # log-space to avoid underflow; mu/sigma from the empirical positive-slice
+    # position distribution (same parameterization as NG's "frozen" mode),
+    # scaled by bag length S instead of a fixed absolute sigma=1.
     x = torch.arange(1, S + 1, dtype=torch.float32)
-    a = utils.normal_pdf(x, mu=S / 2.0, sigma=1.0)
-    return (a / a.sum()).numpy()
+    a = utils.log_normal_pdf(x, mu=0.52 * S, sigma=0.115 * S)
+    return a.numpy()
 
 
 def score_max(h, S, seed):
