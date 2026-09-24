@@ -53,6 +53,10 @@ class GuidedAttentionL1Loss(torch.nn.Module):
         criterion: torch.nn.Module = torch.nn.BCEWithLogitsLoss(),
         eps: float = 1e-6,
         divergence: str = "squared error",
+        fit_mean: bool = True,
+        fit_std: bool = True,
+        empirical_mean: float = 0.5,
+        empirical_std: float = 0.15,
     ) -> None:
         super().__init__()
         self.alpha = alpha
@@ -61,6 +65,35 @@ class GuidedAttentionL1Loss(torch.nn.Module):
         self.eps = eps
         assert divergence in ["squared error", "forward kl", "reverse kl"]
         self.divergence = divergence
+        # Mean/variance ablation: when a moment is not fit from the current
+        # attention, the guiding Normal uses a fixed value derived from the
+        # empirical distribution of positive-slice positions (normalized to
+        # [0, 1] and rescaled per bag by S_i).
+        self.fit_mean = fit_mean
+        self.fit_std = fit_std
+        self.empirical_mean = empirical_mean
+        self.empirical_std = empirical_std
+
+    def _bag_mean(self, a: torch.Tensor) -> torch.Tensor:
+        # a shape: [S_i, num_heads] -> [num_heads]
+        if self.fit_mean:
+            return self._compute_mean(a)
+        S_i, num_heads = a.shape
+        return torch.full(
+            (num_heads,), self.empirical_mean * S_i, device=a.device, dtype=a.dtype
+        )
+
+    def _bag_std(self, a: torch.Tensor) -> torch.Tensor:
+        # a shape: [S_i, num_heads] -> [num_heads]
+        if self.fit_std:
+            return self._compute_std(a)
+        S_i, num_heads = a.shape
+        return torch.full(
+            (num_heads,),
+            max(self.empirical_std, self.eps) * S_i,
+            device=a.device,
+            dtype=a.dtype,
+        )
         
     def _get_j(
         self,
@@ -111,6 +144,7 @@ class GuidedAttentionL1Loss(torch.nn.Module):
         attn_weights: torch.Tensor,
         lengths: Tuple[int, ...],
         params: torch.Tensor,
+        **kwargs,
     ) -> Dict[str, torch.Tensor]:
         
         nll = self.criterion(logits, labels)
@@ -120,8 +154,8 @@ class GuidedAttentionL1Loss(torch.nn.Module):
             split_attn_weights = torch.split(attn_weights, lengths, dim=0)
             
             js = [self._get_j(a) for a in split_attn_weights]
-            means = [self._compute_mean(a) for a in split_attn_weights]
-            stds = [self._compute_std(a) for a in split_attn_weights]
+            means = [self._bag_mean(a) for a in split_attn_weights]
+            stds = [self._bag_std(a) for a in split_attn_weights]
 
             r_hats = torch.cat([
                 utils.normal_pdf(j, mean, std)
@@ -170,6 +204,7 @@ class AEML1Loss(torch.nn.Module):
         attn_weights: torch.Tensor,
         lengths: Tuple[int, ...],
         params: torch.Tensor,
+        **kwargs,
     ) -> Dict[str, torch.Tensor]:
         
         nll = self.criterion(logits, labels)
@@ -184,9 +219,41 @@ class AEML1Loss(torch.nn.Module):
 
         penalty = (self.alpha / 2) * params.abs().sum()
         aem_penalty = self.beta * torch.stack(entropy_penalties).mean()
-        
+
         return {
             "loss": nll + aem_penalty + penalty,
             "nll": nll,
         }
-    
+
+
+class CounterfactualL1Loss(torch.nn.Module):
+    """CIA-MIL (Chraki et al., MIDL 2026): the difference between the factual prediction
+    and a counterfactual prediction (same instances, random attention) must itself be
+    predictive of the label. Forces the decision to depend on the attended evidence.
+
+        loss = nll(logits, y) + (alpha / 2) * ||params||_1 + beta * nll(logits - logits_cf, y)
+    """
+
+    def __init__(
+        self,
+        alpha: float,
+        beta: float,
+        criterion: torch.nn.Module = torch.nn.BCEWithLogitsLoss(),
+    ) -> None:
+        super().__init__()
+        self.alpha = alpha
+        self.beta = beta
+        self.criterion = criterion
+
+    def forward(
+        self,
+        logits: torch.Tensor,
+        labels: torch.Tensor,
+        logits_cf: torch.Tensor,
+        params: torch.Tensor,
+        **kwargs,
+    ) -> Dict[str, torch.Tensor]:
+        nll = self.criterion(logits, labels)
+        penalty = (self.alpha / 2) * params.abs().sum()
+        effect = self.criterion(logits - logits_cf, labels)
+        return {"loss": nll + penalty + self.beta * effect, "nll": nll}

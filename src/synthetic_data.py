@@ -33,6 +33,7 @@ if __name__=="__main__":
     parser.add_argument("--seed", default=42, help="TODO (default: 42)", type=int)
     parser.add_argument("--weight_decay", default=0.0, help="Weight decay (default: 0.0)", type=float)
     parser.add_argument("--neighbors", default=1, help="Number of neighbors for SmAP pooling (default: 1)", type=int)
+    parser.add_argument("--beta_effect", default=1.0, help="CIA counterfactual-effect strength (default: 1.0)", type=float)
     args = parser.parse_args()
     
     torch.manual_seed(args.seed)
@@ -49,7 +50,7 @@ if __name__=="__main__":
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=args.batch_size, collate_fn=utils.collate_fn)
         
     if args.embedding_level:
-        model = models.PoolClf(in_features=768, out_features=1, pooling=args.pooling, neighbors=args.neighbors)
+        model = models.PoolClf(in_features=768, out_features=1, pooling=args.pooling, neighbors=args.neighbors, counterfactual=(args.criterion == "CIA"))
     else:
         model = models.ClfPool(in_features=768, out_features=1, pooling=args.pooling, neighbors=args.neighbors)
     #model = models.AdditiveMIL(in_features=768, out_features=1)
@@ -57,8 +58,8 @@ if __name__=="__main__":
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print(device)
     model.to(device)
-        
-    assert args.criterion in ["ERM", "L1", "L2", "GuidedL1", "AEML1"]
+
+    assert args.criterion in ["ERM", "L1", "L2", "GuidedL1", "AEML1", "CIA"]
     if args.criterion == "ERM":
         criterion = losses.ERMLoss(criterion=torch.nn.BCEWithLogitsLoss())
     elif args.criterion == "L1":
@@ -69,6 +70,8 @@ if __name__=="__main__":
         criterion = losses.GuidedAttentionL1Loss(alpha=args.alpha, beta=args.beta, criterion=torch.nn.BCEWithLogitsLoss())
     elif args.criterion == "AEML1":
         criterion = losses.AEML1Loss(alpha=args.alpha, beta=args.beta, criterion=torch.nn.BCEWithLogitsLoss())
+    elif args.criterion == "CIA":
+        criterion = losses.CounterfactualL1Loss(alpha=args.alpha, beta=args.beta_effect, criterion=torch.nn.BCEWithLogitsLoss())
 
     optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.weight_decay, momentum=0.9)
     
